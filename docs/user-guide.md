@@ -168,6 +168,17 @@ Transfers act on the marks if there are any, otherwise on the cursor row.
 
 ### Transferring
 
+You can also **drag files from one pane to the other**, which queues the
+same transfer: drag from the site to This PC to download, the other way to
+upload. Drop on the pane to use the folder it is showing, or drop straight
+onto a folder row to put the files in that folder. Dragging a row that is
+not part of your selection drags just that row.
+
+Dragging *within* one pane does nothing, and neither does dragging between
+two panes showing the same kind of place. That would be a move, which
+deletes the original, and warpseed does not do moves yet — so those drags
+are not offered at all rather than being refused after the fact.
+
 - **F5** — transfer the selection to the other pane (download if the
   active pane is remote, upload if it's local). Items go straight into
   the queue and start as soon as a slot is free.

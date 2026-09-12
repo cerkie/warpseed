@@ -55,6 +55,41 @@ export default function App() {
   const setMiniMode = useUiStore((s) => s.setMiniMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
 
+  // A file dragged in from Explorer is not something warpseed can accept —
+  // dragging in and out is not supported — but WITHOUT this the webview
+  // takes the drop as a navigation and replaces the whole app with the
+  // file. There is no address bar to come back from, so the window is dead
+  // until the user restarts it. The panes stopPropagation on the drags they
+  // DO handle, so this only ever sees the ones nothing wanted.
+  useEffect(() => {
+    // A TEXT drop into an input is wanted, and no JS handler exists to claim
+    // it on the field's behalf, so those are left to the browser. A drop
+    // carrying FILES never is — an input is a big, central, inviting target,
+    // and exempting it there would reopen the very hole this closes.
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+    const editable = (t: EventTarget | null) =>
+      t instanceof HTMLElement &&
+      (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA");
+    const leaveAlone = (e: DragEvent) => editable(e.target) && !hasFiles(e);
+    const block = (e: DragEvent) => {
+      if (leaveAlone(e)) return;
+      e.preventDefault();
+      // Keep saying "no drop": preventDefault alone would offer a copy
+      // cursor and promise something that is not going to happen.
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    };
+    const swallow = (e: DragEvent) => {
+      if (leaveAlone(e)) return;
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", swallow);
+    };
+  }, []);
+
   // Boot: home dirs, schema health, saved sites, backend event subscriptions.
   useEffect(() => {
     void schemaVersion().then(setDbSchemaVersion).catch(() => setDbSchemaVersion(0));

@@ -527,3 +527,22 @@
   font-family: var(--font-data);
   white-space: pre;
 }
+
+/* Dragging rows to the other pane queues a transfer. The pane it would land
+   in is outlined; a folder row under the pointer takes the drop instead, and
+   says so, because the destination is not the one the pane is showing. */
+.pane__list--dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-glow);
+}
+/* Specific enough to beat `.pane:not(.pane--active) .row--cursor` and
+   `.row--marked.row--cursor`, both of which set a background and both of
+   which the destination folder can be wearing: the destination pane is by
+   definition not the active one during a cross-pane drag, so the plain
+   class lost the fill on exactly the row under the pointer. */
+.pane__scroll .row.row--dropinto {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}

@@ -117,6 +117,69 @@ function matches(name: string, filter: string): boolean {
   return name.toLowerCase().includes(f);
 }
 
+/** Dragging rows from one pane to the other queues a transfer — the mouse
+    route to F5, and the only thing a drop does. A drag that cannot become a
+    transfer (within one pane, or between two panes of the same kind) is a
+    move, which deletes the source; that is a separate decision and is not
+    built, so those drags are simply never accepted.
+
+    The source KIND rides in the MIME type rather than only in the payload
+    because `dragover` may read `dataTransfer.types` but not the data. That
+    is what lets a pane accept only the drags it can actually act on: drag
+    between two local panes and the cursor says "no drop" instead of
+    inviting a drop that would be refused on release. */
+const DRAG_FROM_LOCAL = "application/x-warpseed-from-local";
+const DRAG_FROM_SITE = "application/x-warpseed-from-site";
+
+interface DragItem {
+  name: string;
+  size: number;
+  isDir: boolean;
+  modTime: string;
+}
+
+interface DragPayload {
+  /** Which pane the drag started in, so a drop can never act on itself even
+      if the MIME gate is somehow satisfied. */
+  side: PaneSide;
+  /** The site the items live on; null when they are on this PC. */
+  siteId: number | null;
+  /** Whether these items ARE the source pane's marked set. A drop clears
+      those marks, the way F5 does, so the same files cannot be queued twice
+      by a second drag or a stray F5. A drag of one unmarked row leaves the
+      marks alone: they were not what moved. */
+  fromMarks: boolean;
+  /** The directory they came from, separator included. */
+  base: string;
+  items: DragItem[];
+}
+
+/** The path separator for a directory on this kind of source.
+
+    A remote path is ALWAYS POSIX and is never sniffed. A directory on an
+    SFTP server may legally be named with a backslash in it, and guessing
+    the separator from the string then builds paths the server cannot
+    resolve — and traps the user inside the folder, because going up trims
+    at the backslash and lands on a directory that does not exist. */
+function sepFor(p: string, remote: boolean): string {
+  // A remote path is POSIX unless the host serves drive-letter paths, which
+  // navigateTyped already knows some SFTP servers do. Testing the SHAPE
+  // rather than sniffing for a backslash anywhere is what separates
+  // "D:\\Media" — a Windows host — from "/home/bob/back\\slash", a POSIX
+  // directory that merely has one in its name and that a sniff would trap
+  // the user inside.
+  if (remote && !looksWindows(p)) return "/";
+  // Windows-shaped, local or remote: follow the spelling already in use,
+  // since Windows takes either. A bare "D:" offers no evidence, and the
+  // drive root is conventionally written "D:\\".
+  return p.includes("\\") ? "\\" : p.includes("/") ? "/" : "\\";
+}
+
+/** The destination a drag is currently over, when it is the pane's own
+    folder rather than a subfolder in it. Not a possible file name, so it
+    can never collide with one. */
+const PANE_DIR = "\u0000pane";
+
 export default function FilePane({ side }: { side: PaneSide }) {
   const { source, path } = useUiStore((s) => s.panes[side]);
   const isActive = useUiStore((s) => s.activePane === side);
@@ -255,7 +318,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // put the cursor back on it.
   const goUp = useCallback(() => {
     const here = nav.listing?.path ?? path;
-    const s = here.includes("\\") ? "\\" : "/";
+    const s = sepFor(here, typeof source === "number");
     const trimmed = here.length > 1 && here.endsWith(s) ? here.slice(0, -1) : here;
     const i = trimmed.lastIndexOf(s);
     landOn.current = i >= 0 && i < trimmed.length - 1 ? trimmed.slice(i + 1) : null;
@@ -265,7 +328,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
     // the filter clears.
     setFilter(null);
     nav.up();
-  }, [nav, path]);
+  }, [nav, path, source]);
 
   // Reset selection state on navigation, landing on the folder we just left
   // when this was an "up". "Up, look around, back down" is the dominant
@@ -369,7 +432,9 @@ export default function FilePane({ side }: { side: PaneSide }) {
         toast("error", "Nothing selected to transfer");
         return;
       }
-      const sep = nav.listing.path.includes("\\") ? "\\" : "/";
+      // Reached only from a local pane (guarded above), but routed through
+      // the one rule anyway so no raw sniff is left to copy.
+      const sep = sepFor(nav.listing.path, false);
       const base = nav.listing.path.endsWith(sep) ? nav.listing.path : nav.listing.path + sep;
       try {
         await enqueueUploads(
@@ -390,7 +455,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
     (e: FsEntry) => {
       if (!nav.listing) return;
       if (e.isDir) {
-        const sep = nav.listing.path.includes("\\") ? "\\" : "/";
+        const sep = sepFor(nav.listing.path, typeof source === "number");
         const base = nav.listing.path.endsWith(sep) ? nav.listing.path : nav.listing.path + sep;
         nav.navigate(base + e.name);
       } else if (typeof source === "number") {
@@ -486,7 +551,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
     [source, side, setPane, nav, path],
   );
 
-  const sep = (p: string) => (p.includes("\\") ? "\\" : "/");
+  const sep = (p: string) => sepFor(p, typeof source === "number");
   const joinHere = useCallback(
     (name: string) => {
       const base = nav.listing?.path ?? path;
@@ -494,6 +559,180 @@ export default function FilePane({ side }: { side: PaneSide }) {
       return (base.endsWith(s) ? base : base + s) + name;
     },
     [nav.listing, path],
+  );
+
+  // Which kind of drag this pane produces, and the one kind it can turn
+  // into a transfer. A site pane receives uploads, a local pane receives
+  // downloads; nothing else is a transfer.
+  const dragType = source === "local" ? DRAG_FROM_LOCAL : DRAG_FROM_SITE;
+  const acceptType = source === "local" ? DRAG_FROM_SITE : DRAG_FROM_LOCAL;
+  // Which destination a drag is over: null for none, PANE_DIR for the
+  // folder the pane is showing, otherwise the NAME of the folder row under
+  // the pointer.
+  //
+  // By name and not by row index, because the listing re-lists underneath a
+  // drag — placeholders appear and are renamed in the very folder that is
+  // receiving transfers — and dragover only re-fires every ~350ms while the
+  // pointer rests. An index captured before a re-list would resolve to
+  // whichever folder had shifted into that slot, and the files would be
+  // queued somewhere the user never pointed at.
+  const [dropOn, setDropOn] = useState<string | null>(null);
+
+  const startDrag = useCallback(
+    (ev: React.DragEvent, index: number) => {
+      const entry = entries[index];
+      if (!entry || !nav.listing) {
+        // Abort rather than let the browser carry an empty drag around: with
+        // no MIME type set, nothing could ever accept it and the user would
+        // be left dragging a ghost with no way to find out why.
+        ev.preventDefault();
+        return;
+      }
+      // Dragging a row inside the marked set takes the whole set; dragging
+      // one outside it takes just that row. Unlike right-click, this does
+      // NOT re-point the marks at the dragged row: a drag is over in a
+      // moment and silently discarding a selection the user spent time on
+      // would be a poor trade for the consistency.
+      const fromMarks = marks.has(entry.name);
+      const picked = fromMarks ? entries.filter((e) => marks.has(e.name)) : [entry];
+      const payload: DragPayload = {
+        side,
+        fromMarks,
+        siteId: typeof source === "number" ? source : null,
+        base: joinHere(""),
+        items: picked.map((e) => ({
+          name: e.name,
+          size: e.size,
+          isDir: e.isDir,
+          modTime: e.modTime,
+        })),
+      };
+      ev.dataTransfer.setData(dragType, JSON.stringify(payload));
+      // Copy, not move: a transfer leaves the source where it is.
+      ev.dataTransfer.effectAllowed = "copy";
+    },
+    [entries, marks, nav.listing, side, source, dragType, joinHere],
+  );
+
+  // A drag that ends anywhere — cancelled with Escape, dropped outside the
+  // window, or on a row that has since been re-listed away — fires dragend
+  // on the SOURCE pane only, so the destination's own highlight would stay
+  // lit on an idle pane. Both panes listen and clear their own.
+  //
+  // dragstart is in the list because dragend does NOT always arrive: it
+  // fires on the source node, and a source row unmounted mid-drag (its pane
+  // re-listing underneath it) never bubbles anywhere. The next drag then
+  // starts with a stale outline still painted, so beginning one clears it.
+  useEffect(() => {
+    const clear = () => setDropOn(null);
+    for (const ev of ["dragend", "drop", "dragstart"]) window.addEventListener(ev, clear);
+    return () => {
+      for (const ev of ["dragend", "drop", "dragstart"]) window.removeEventListener(ev, clear);
+    };
+  }, []);
+
+  /** Whether this drag is one this pane can turn into a transfer. Runs on
+      every dragover, so it reads the types list and nothing else. */
+  const canAccept = useCallback(
+    (ev: React.DragEvent) => ev.dataTransfer.types.includes(acceptType),
+    [acceptType],
+  );
+
+  // Deliberately does NOT scroll the listing while a drag hovers its edge.
+  // Three attempts at it each traded one dead end for another: suppressing
+  // it over folder rows makes an all-folders listing unreachable, allowing
+  // it there slides the target out from under a resting pointer, and
+  // dragover fires both too rarely to scroll usefully when the pointer is
+  // still and too often when it sweeps past. Scroll the destination to the
+  // folder you want BEFORE picking the files up; every visible folder row
+  // is a target, and the pane itself always is.
+  const overDrop = useCallback(
+    (ev: React.DragEvent, dir: string) => {
+      if (!canAccept(ev)) return; // no preventDefault: the drop is not offered
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.dataTransfer.dropEffect = "copy";
+      setDropOn(dir);
+    },
+    [canAccept],
+  );
+
+  const doDrop = useCallback(
+    (ev: React.DragEvent, dir: string) => {
+      if (!canAccept(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      setDropOn(null);
+      // Everything below has already shown the accept outline and the copy
+      // cursor, so a bail-out here looks to the user exactly like warpseed
+      // losing the drag. Say so instead of doing nothing: the reachable
+      // case is a selection too large for the platform's drag store, where
+      // getData comes back empty.
+      const lost = () =>
+        toast("error", "Could not read what was dropped — mark the files and press F5 instead");
+      if (!nav.listing) {
+        // The pane switched source and its listing has not landed yet, so
+        // there is no destination to name. Brief, but a drop in it would
+        // otherwise vanish without a word.
+        lost();
+        return;
+      }
+      const raw = ev.dataTransfer.getData(acceptType);
+      if (!raw) {
+        lost();
+        return;
+      }
+      let payload: DragPayload;
+      try {
+        payload = JSON.parse(raw) as DragPayload;
+      } catch {
+        lost();
+        return;
+      }
+      if (payload.side === side) return; // its own pane: nothing to transfer
+      if (payload.items.length === 0) {
+        lost();
+        return;
+      }
+      // The name the pointer was actually over, resolved against this
+      // pane's own path — never a row index, which a re-list can re-point.
+      const dst = dir === PANE_DIR ? nav.listing.path : joinHere(dir);
+      const n = payload.items.length;
+      const noun = `${n} item${n === 1 ? "" : "s"}`;
+      const src = payload.items.map((e) => ({
+        src: payload.base + e.name,
+        size: e.size,
+        isDir: e.isDir,
+        modTime: e.modTime,
+      }));
+      const queued = (what: string) => {
+        useUiStore.getState().setQueueOpen(true);
+        toast("success", `Queued ${noun} for ${what}`);
+        if (payload.fromMarks) {
+          // The other pane owns those marks, so ask it — the same bus the
+          // palette's "Deselect all" uses. Sent only once the transfer is
+          // actually queued: a failed drop leaves the selection to retry.
+          window.dispatchEvent(
+            new CustomEvent("ws:panecmd", { detail: { side: payload.side, cmd: "clearmarks" } }),
+          );
+        }
+      };
+      if (source === "local") {
+        if (payload.siteId === null) return; // gated by MIME; belt and braces
+        void enqueueDownloads(payload.siteId, src, dst)
+          .then(() => queued("download"))
+          .catch((err: unknown) => toast("error", String(err)));
+      } else if (typeof source === "number") {
+        void enqueueUploads(
+          source,
+          src.map(({ src: s, size, isDir }) => ({ src: s, size, isDir })),
+          dst,
+        )
+          .then(() => queued("upload"))
+          .catch((err: unknown) => toast("error", String(err)));
+      }
+    },
+    [canAccept, acceptType, joinHere, nav.listing, side, source],
   );
 
   const selection = useCallback((): FsEntry[] => {
@@ -1115,11 +1354,23 @@ export default function FilePane({ side }: { side: PaneSide }) {
         </div>
       ) : (
         <div
-          className="pane__list"
+          /* The drop handlers sit HERE rather than on the scroller so that
+             the column-header strip counts as part of the pane — it looks
+             like the listing, sits flush against the first row, and a drop
+             on it used to be refused with a "no drop" cursor. Folder rows
+             stopPropagation, so they still take the drop themselves. */
+          className={`pane__list${dropOn === PANE_DIR ? " pane__list--dropping" : ""}`}
           style={colStyle}
           role="grid"
           aria-rowcount={entries.length + 1}
           aria-multiselectable="true"
+          onDragOver={(ev) => overDrop(ev, PANE_DIR)}
+          onDragLeave={(ev) => {
+            // Only when the pointer has actually left the pane, not on the
+            // leave fired for every row it crosses inside it.
+            if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setDropOn(null);
+          }}
+          onDrop={(ev) => doDrop(ev, PANE_DIR)}
         >
           {/* Sortable, resizable headings: click to sort, drag the divider
               beside Size or Modified to give the name column more room. The
@@ -1204,6 +1455,9 @@ export default function FilePane({ side }: { side: PaneSide }) {
           </div>
         ) : (
         <div
+          /* Only when the LISTING is the destination: with a folder row
+             under the pointer the drop goes there instead, and lighting
+             both would say the files were headed two places at once. */
           className="pane__scroll"
           ref={scrollRef}
           tabIndex={0}
@@ -1235,6 +1489,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
                 e.isDir ? "row--dir" : "",
                 vi.index === cursor ? "row--cursor" : "",
                 marks.has(e.name) ? "row--marked" : "",
+                dropOn === e.name && e.isDir ? "row--dropinto" : "",
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -1245,6 +1500,15 @@ export default function FilePane({ side }: { side: PaneSide }) {
                   style={{ transform: `translateY(${vi.start}px)` }}
                   onClick={(ev) => selectAt(vi.index, ev)}
                   onDoubleClick={() => open(e)}
+                  draggable
+                  onDragStart={(ev) => startDrag(ev, vi.index)}
+                  onDragEnd={() => setDropOn(null)}
+                  {...(e.isDir
+                    ? {
+                        onDragOver: (ev: React.DragEvent) => overDrop(ev, e.name),
+                        onDrop: (ev: React.DragEvent) => doDrop(ev, e.name),
+                      }
+                    : {})}
                   onContextMenu={(ev) => {
                     ev.preventDefault();
                     setActivePane(side);

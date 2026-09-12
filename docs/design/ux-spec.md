@@ -141,6 +141,7 @@ Two coexisting mechanisms, exactly as commander veterans expect:
 - **Cursor** — one row per pane, moved by arrows, shown even when the pane is unfocused (dimmed).
 - **Marks** — sticky multi-selection via Insert/Space/Num-pad globs, surviving cursor movement and sort changes. Marked rows tint accent at 12% opacity + accent-colored size text. Pane footer aggregates: "7 marked · 3.2 GiB".
 - Mouse: click = cursor+select; Ctrl+click = toggle mark; Shift+click = range from anchor; drag on empty = rubber-band marking.
+- **Drag to the other pane = transfer (shipped 1.1.11).** Dragging rows to the opposite pane queues a download or an upload; dropping on a folder row targets that folder (§7.1's "drop-target dir" treatment), dropping anywhere else in the listing targets the folder it is showing. A drag carries its source kind in the MIME type, not just its payload, because `dragover` may read `dataTransfer.types` but not the data — so a pane offers the drop ONLY for a drag it can turn into a transfer. Same-pane drags and drags between two panes of the same kind would be MOVES, which are not built: they are never accepted, so the pointer says "no drop" rather than inviting a drop that gets refused on release. Explorer drag in/out stays excluded (native OLE, absent from Wails v2).
 - F5/F6/F8/Ctrl+C act on marks if any exist, else on the cursor row.
 
 ---

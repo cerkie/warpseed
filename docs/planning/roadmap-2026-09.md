@@ -31,7 +31,7 @@ anything in Phase 2.
 
 | # | Item | Size | Notes |
 |---|---|---|---|
-| 2.1 | **Drag and drop** | L | Cross-pane drop queues a transfer; drop on a folder row targets it; same-pane drop onto a folder moves (destructive — needs confirmation). Explicitly excludes drag in/out of Explorer. |
+| 2.1 | **Drag and drop** | L | **Transfers done in 1.1.11**, moves deliberately not built. A drag carries its source KIND in the MIME type, so a pane offers the drop only for a drag it can turn into a transfer: cross-pane local↔site queues a download or an upload, dropping on a folder row targets that folder, and every other drag (same pane, or two panes of the same kind) is never accepted rather than accepted-then-refused. That sidesteps open questions 4 and 5 instead of answering them — they only matter once a drop may MOVE, which stays unbuilt along with question 6. Drag in/out of Explorer remains excluded (needs native OLE that Wails v2 lacks). |
 | 2.2 | ~~**Close-guard dialog + close-to-pill**~~ | M | **Done in 1.1.8** (WP-B1 + WP-F1, the must-ship pair). `OnBeforeClose` emits and returns on the UI thread — no channel wait, no WaitGroup, no SQL — and the answer arrives later through ConfirmQuit/CancelQuit/CloseToPill. Three escapes keep the window closable: the quit latch, a second close gesture, and a 2 s force-quit if the frontend never acks. `ui.close_action` (ask/quit/pill) applies only while transfers are RUNNING, so an idle app always closes instantly. WP-B2 (graceful drain) and B3/F2/F3 remain. |
 | 2.3 | ~~**Folder tree children cache**~~ | S | **Done in 1.1.8.** `frontend/src/lib/treeCache.ts` holds children, expansion and failed-listing markers keyed by source+path, outside React so a branch survives collapsing its parent and closing the sidebar. Invalidated subtree-wide by `fs:changed` and purged per source on connect/disconnect. Measured: re-expand went from 1 listing to 0, restoring a collapsed branch from N to 0. Also fixed a staleness bug this uncovered — every remote root is "/", so switching a pane between sites showed the previous server's folders. |
 | 2.5 | ~~**Queue control: bulk cancel + global pause**~~ | M | **Done in 1.1.10.** Tester request (2026-09-11): a queued folder could only be cancelled row by row, and the queue always resumed on launch. Now: row selection in the dock with *Cancel selected* / Delete; *Cancel all queued* (state-based, so it reaches rows beyond the 2,000-row list window); *Pause queue* persisted as `queue.paused` — running rows are requeued clean via `Store.Requeue` rather than classified as failures (shutdown now takes the same path); `queue.start_paused` setting. |
@@ -50,7 +50,9 @@ rather than implementation detail.
 3. ~~Guard versus the shared confirm slot.~~ The guard is its own component with its own store flag,
    so it cannot collide with `askConfirm`.
 
-**2.1 drag and drop**
+**2.1 drag and drop** — 4 and 5 are PARKED, not answered: 1.1.11 ships
+transfers only, and a drag that could mean a move is never offered. They
+come back the day a drop is allowed to move.
 4. Cross-pane drop where both panes are the SAME source (both local, or the same site): reject with a
    toast, or treat it as a move? The queue is siteId-based and has no same-kind cross-pane path, so
    rejecting is the literal reading of the roadmap.

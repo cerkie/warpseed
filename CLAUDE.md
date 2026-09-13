@@ -13,6 +13,8 @@ repo; bugs arrive at warpseed@zyralabs.tech.
 - `docs/planning/roadmap-2026-09.md` — what is next, ordered by what it costs
   the user. Phase 1 (data safety) ships before anything else.
 - `docs/user-guide.md` — what the app promises users; keep it true.
+- `docs/test-harness.md` — how to exercise real transfers on Windows, which is
+  the only place NTFS behaviour and the Windows file APIs are reachable.
 - `docs/release/release-notes-*.md` — one file per release, user-facing.
 
 ## Stack
@@ -48,6 +50,10 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"   # go/node are mise shims
 go vet ./... && go test ./...                        # Go side
 cd frontend && npm run build                         # tsc + vite; the type-check
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /dev/null .   # per-commit sanity
+```
+
+```
+go run ./cmd/harness -self-test        # real SSH+SFTP, real transfers, on THIS machine
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly those three on every push.

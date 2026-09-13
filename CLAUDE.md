@@ -40,7 +40,9 @@ internal/events           Go -> frontend event names, one place
 frontend/src/tokens.css   every colour, font and density value; themes are token blocks
 frontend/src/mock         browser mock backend: `npm run dev` then `?mock=1&theme=cobalt|iris`
 docs/                     design, planning, release notes, user guide, screenshots
+cmd/harness             real transfers against a real server; see docs/test-harness.md
 update.ps1 / release.ps1  the user's Windows build loop and manual release
+push.sh                   push + the gh account switch either side of it
 ```
 
 ## Commands

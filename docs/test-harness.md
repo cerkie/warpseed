@@ -11,6 +11,17 @@ placeholder handling.
 
 ## The quickest way
 
+`update.ps1` builds the harness beside `warpseed.exe` on every run, so it is
+never a stale copy of an older commit:
+
+```powershell
+.\update.ps1 -Harness        # update, build both, run the self-test
+.\update.ps1                 # update, build both, print how to run it
+.\update.ps1 -NoHarness      # app only
+```
+
+Or build and run it by hand:
+
 ```powershell
 go build -o harness.exe ./cmd/harness
 .\harness.exe -self-test

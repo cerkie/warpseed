@@ -14,3 +14,7 @@ frontend/package.json.md5
 
 # tester bug reports (screenshots, logs) — kept local, never published
 bug-reports/
+
+# the harness writes its log beside whatever ran it, which update.ps1 makes
+# the repo root
+warpseed-harness*.log

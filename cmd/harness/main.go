@@ -28,6 +28,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -39,6 +41,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"warpseed/internal/applog"
 	"warpseed/internal/dispatch"
 	"warpseed/internal/engine/sftpfast"
 	"warpseed/internal/queue"
@@ -58,6 +61,7 @@ var (
 	flagLog       = flag.String("log", "warpseed-harness.log", "write the log here as well as to the screen")
 	flagOnly      = flag.String("only", "", "run only scenarios whose name contains this")
 	flagSelfTest  = flag.Bool("self-test", false, "run against an SSH/SFTP server inside this process, on loopback; needs no server, no credentials and no network")
+	flagVerbose   = flag.Bool("verbose", false, "include the engine's own per-lane diagnostics in the log")
 )
 
 func main() {
@@ -136,6 +140,13 @@ func run() error {
 	}
 	defer lf.Close()
 	lg := &logger{f: lf, start: time.Now()}
+
+	// The dispatcher and the engine report through the standard logger. Those
+	// lines were going to stderr only, so the log file sent on after a failure
+	// was missing exactly the half that explains it. Both now, and -verbose
+	// adds the engine's per-lane detail.
+	log.SetOutput(io.MultiWriter(os.Stderr, lf))
+	applog.SetVerbose(*flagVerbose)
 
 	localDir := *flagLocalDir
 	if localDir == "" {

@@ -250,6 +250,16 @@ func waitLocalGone(ctx context.Context, paths []string, what string) error {
 	})
 }
 
+// resumeIfPaused restarts the queue only when it is actually stopped, so a
+// scenario that already resumed for itself does not log a second one. Used as
+// a deferred safety net: a scenario that fails inside its paused window would
+// otherwise leave every later scenario sitting on a timeout.
+func (h *harness) resumeIfPaused() {
+	if h.disp.Paused() {
+		_ = h.disp.SetPaused(false)
+	}
+}
+
 // waitTerminal waits for a row to stop moving, whichever way it stopped.
 func (h *harness) waitTerminal(ctx context.Context, id int64, timeout time.Duration) (queue.Transfer, error) {
 	deadline := time.Now().Add(timeout)
@@ -434,8 +444,11 @@ func (h *harness) scPauseResume(ctx context.Context) error {
 	}
 	// Resumed whatever happens below. Without this, the very failure this
 	// scenario exists to catch would leave the queue paused, and every later
-	// scenario would sit on its own timeout reporting nonsense.
-	defer func() { _ = h.disp.SetPaused(false) }()
+	// scenario would sit on its own timeout reporting nonsense. It asks
+	// whether the queue is still paused rather than tracking that itself, so
+	// the log does not carry a second "queue: resumed" implying something
+	// happened twice.
+	defer h.resumeIfPaused()
 	paused, err := h.waitState(ctx, id, "pending", 2*time.Minute)
 	if err != nil {
 		return fmt.Errorf("after Pause queue: %w", err)
@@ -568,7 +581,7 @@ func (h *harness) scBulkCancel(ctx context.Context) error {
 	if err := h.disp.SetPaused(true); err != nil {
 		return err
 	}
-	defer func() { _ = h.disp.SetPaused(false) }()
+	defer h.resumeIfPaused()
 
 	const n = 6
 	var dsts, remotes, locals []string

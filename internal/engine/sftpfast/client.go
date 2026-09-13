@@ -192,3 +192,16 @@ func (c *Client) Home() (string, error) {
 func newFromSFTP(sc *sftp.Client) *Client {
 	return &Client{sftp: sc}
 }
+
+// NewFromSFTP wraps an SFTP session the caller already owns. The ssh half
+// stays nil, so Close closes only the SFTP client and the transport remains
+// the caller's to shut down.
+//
+// It exists so tests OUTSIDE this package can hand the dispatcher genuine
+// *Client values driven by a real pkg/sftp server over pipes. The dispatcher
+// is where cancel decides to delete a user's bytes, and until this seam
+// existed every one of its tests ran with dialing disabled, so the remote
+// half of that decision had never executed. Production code calls Dial.
+func NewFromSFTP(sc *sftp.Client) *Client {
+	return newFromSFTP(sc)
+}

@@ -289,3 +289,12 @@ func (c Config) authMethods() (methods []ssh.AuthMethod, closeAgent func(), err 
 	}
 	return methods, closeAgent, nil
 }
+
+// OpenReader opens a remote file for reading at arbitrary offsets, over
+// whichever protocol the client speaks.
+func (c *Client) OpenReader(remotePath string) (interface {
+	io.ReaderAt
+	io.Closer
+}, error) {
+	return c.openReaderAt(remotePath)
+}

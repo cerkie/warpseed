@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -49,6 +50,9 @@ type App struct {
 
 	mu       sync.Mutex
 	sessions map[int64]*sftpfast.Client // browse connection per connected site
+
+	dragBase string       // URL prefix of the drag-out file server
+	dragSrv  *http.Server
 
 	notifyOnce sync.Once
 	notifyErr  error
@@ -159,6 +163,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	go a.dispatcher.Run(ctx)
 	a.startUpdateCheck()
+	a.startDragServer()
 }
 
 // dialTransfers opens n dedicated data connections for one transfer.
@@ -184,7 +189,7 @@ func (a *App) dialTransfers(ctx context.Context, siteID int64, n int) ([]*sftpfa
 	// SSH servers count unauthenticated connections (MaxStartups), so starts
 	// are spaced; FTPS has no such penalty and goes all at once.
 	stagger := dialStagger
-	if site.Protocol == "ftps" {
+	if site.Protocol == "ftps" || site.Protocol == "ftp" {
 		stagger = 0
 	}
 	return a.dialAll(ctx, siteID, site, password, n, stagger)
@@ -214,6 +219,9 @@ func (a *App) shutdown(_ context.Context) {
 	// resume from and the whole file transfers again from byte zero.
 	if a.dispatcher != nil {
 		a.dispatcher.Stop(shutdownGrace)
+	}
+	if a.dragSrv != nil {
+		_ = a.dragSrv.Close()
 	}
 	a.mu.Lock()
 	for id, c := range a.sessions {
@@ -1820,7 +1828,9 @@ var settingValidators = map[string]func(string) error{
 	"ui.pane_state":    jsonBlob,         // each pane's source and folder
 	"ui.pane_hidden":   jsonBlob,         // file-list columns the user hid
 	"ui.notify":        oneOf("0", "1"),  // desktop notification when the queue finishes
-	"ui.remote_side":   oneOf("0", "1"),   // the pane server connections open in
+	"ui.remote_side":   oneOf("0", "1", "2"),   // the pane server connections open in
+	"ui.pane_count":    oneOf("2", "3"),     // how many file panes are shown
+	"ui.pane_widths":   jsonBlob,            // pane widths in percent, per pane count
 	"ui.recents":       jsonBlob,
 	// One-time flags ("1" once shown) — e.g. the post-first-transfer
 	// support-the-project toast must never repeat.
@@ -1926,13 +1936,14 @@ func (a *App) emitConnState(siteID int64, state string) {
 // is the TOFU callback for unknown host keys / certificates (nil denies them).
 func (a *App) dialSite(ctx context.Context, siteID int64, site queue.Site, password string, prompt func(algo, fingerprint string) bool) (*sftpfast.Client, error) {
 	opts := parseSiteOptions(site.OptionsJSON)
-	if site.Protocol == "ftps" {
+	if site.Protocol == "ftps" || site.Protocol == "ftp" {
 		return sftpfast.DialFTPS(ctx, sftpfast.FTPSConfig{
 			Host:     site.Host,
 			Port:     site.Port,
 			User:     site.Username,
 			Password: password,
 			Implicit: opts.Implicit,
+			Plain:    site.Protocol == "ftp",
 			Verify: func(der []byte) error {
 				return a.hostkeys.Verify(siteID, hostkeys.CertAlgo, hostkeys.CertFingerprint(der), prompt)
 			},

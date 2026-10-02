@@ -33,6 +33,10 @@ each change lives in the code.
 | Recycle Bin deletes | `internal/localfs/trash_windows.go` |
 | Single running instance | `main.go` (`SingleInstanceLock`) |
 | Graphite theme; themed dropdown lists | `tokens.css`, `lib/theme.ts` |
+| Plain FTP | `ftps.go` (`FTPSConfig.Plain`), `app.go` (`dialSite`), `lib/protocol.ts` |
+| Third pane, per-count pane widths, transfer target = last-used other pane | `store.ts` (`paneCount`, `otherSide`), `PaneArea.tsx` |
+| Drag in from Explorer | `main.go` (`EnableFileDrop`), `lib/fileDrop.ts`, `app.go`/`dragout.go` (`EnqueueUploadsFromPaths`) |
+| Drag a single file out to Explorer | `dragout.go` (loopback file server), `lib/dragOut.ts`, `FilePane.tsx` (`DownloadURL`) |
 | Installer build | `wails build -nsis` (needs NSIS) |
 
 ## Settings that need allow-listing

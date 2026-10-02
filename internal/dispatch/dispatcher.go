@@ -1505,11 +1505,11 @@ func (d *Dispatcher) emitStateSrc(id int64, src, state, errMsg string) {
 	d.sink.Emit("queue:changed", nil)
 }
 
-// isFTPS reports whether a site speaks FTPS. FTP has no random-access writes,
+// isFTPS reports whether a site speaks FTP or FTPS. FTP has no random-access writes,
 // so FTPS uploads run on one connection (downloads can still split via REST).
 func (d *Dispatcher) isFTPS(siteID int64) bool {
 	site, err := d.store.SiteByID(siteID)
-	return err == nil && site.Protocol == "ftps"
+	return err == nil && (site.Protocol == "ftps" || site.Protocol == "ftp")
 }
 
 // removeMovedSource deletes the original of a completed move, then prunes the

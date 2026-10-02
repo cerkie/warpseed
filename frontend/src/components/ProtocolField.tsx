@@ -5,6 +5,7 @@ const HINTS: Record<SiteMode, string> = {
   sftp: "SSH file transfer. Most seedboxes want this.",
   ftps: "FTP upgraded with TLS on the usual port. Not the same as SFTP.",
   "ftps-implicit": "FTP over TLS from the first byte, usually port 990.",
+  ftp: "Plain FTP. Your password and files are sent unencrypted, so only use it on a network you trust.",
 };
 
 /** Protocol and (for SFTP) login-method fields. Moving to another protocol
@@ -28,6 +29,7 @@ export default function ProtocolField({
           <option value="sftp">SFTP (SSH)</option>
           <option value="ftps">FTPS (explicit TLS)</option>
           <option value="ftps-implicit">FTPS (implicit TLS)</option>
+          <option value="ftp">FTP (no encryption)</option>
         </select>
         <span className="note">{HINTS[form.mode]}</span>
       </div>

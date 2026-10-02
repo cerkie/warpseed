@@ -5,6 +5,10 @@ import { create } from "zustand";
 import { transfersList, type PaneSource, type Site, type Transfer } from "./ipc";
 import { getPref, setPref } from "./lib/prefs";
 
+function readPaneCount(): 2 | 3 {
+  return getPref("ui.pane_count") === "3" ? 3 : 2;
+}
+
 function readHiddenCols(): string[] {
   try {
     const v = JSON.parse(getPref("ui.pane_hidden") ?? "[]");
@@ -22,7 +26,7 @@ interface ProgressSample {
   chunks?: number[]; // per-connection completion fractions
 }
 
-export type PaneSide = 0 | 1;
+export type PaneSide = 0 | 1 | 2;
 
 /** One line of the flight-view session log (ring buffer, newest first). */
 export interface SessionEvent {
@@ -53,8 +57,12 @@ interface PaneState {
 }
 
 interface UiState {
-  panes: [PaneState, PaneState];
+  /** Three slots; only the first `paneCount` are shown. */
+  panes: [PaneState, PaneState, PaneState];
+  paneCount: 2 | 3;
   activePane: PaneSide;
+  /** Panes from most to least recently active, for picking a transfer target. */
+  activeOrder: PaneSide[];
   dbSchemaVersion: number;
   sites: Site[];
   connStates: Record<number, string>;
@@ -78,6 +86,7 @@ interface UiState {
   setPane: (side: PaneSide, source: PaneSource, path: string) => void;
   setPath: (side: PaneSide, path: string) => void;
   setActivePane: (side: PaneSide) => void;
+  setPaneCount: (n: 2 | 3) => void;
   setDbSchemaVersion: (v: number) => void;
   setSites: (s: Site[]) => void;
   setConnState: (siteId: number, state: string) => void;
@@ -111,8 +120,11 @@ export const useUiStore = create<UiState>((set) => ({
   panes: [
     { source: "local", path: "" },
     { source: "local", path: "" },
+    { source: "local", path: "" },
   ],
+  paneCount: readPaneCount(),
   activePane: 0,
+  activeOrder: [0, 1, 2],
   dbSchemaVersion: 0,
   sites: [],
   connStates: {},
@@ -143,7 +155,12 @@ export const useUiStore = create<UiState>((set) => ({
       panes[side] = { ...panes[side], path };
       return { panes };
     }),
-  setActivePane: (side) => set({ activePane: side }),
+  setActivePane: (side) =>
+    set((s) => ({ activePane: side, activeOrder: [side, ...s.activeOrder.filter((p) => p !== side)] })),
+  setPaneCount: (paneCount) => {
+    setPref("ui.pane_count", String(paneCount));
+    set((s) => ({ paneCount, activePane: s.activePane >= paneCount ? 0 : s.activePane }));
+  },
   setDbSchemaVersion: (v) => set({ dbSchemaVersion: v }),
   setSites: (sites) => set({ sites }),
   setConnState: (siteId, state) =>
@@ -232,3 +249,10 @@ export const useUiStore = create<UiState>((set) => ({
       sessionLog: [{ at: Date.now(), kind, text }, ...s.sessionLog].slice(0, SESSION_LOG_CAP),
     })),
 }));
+
+/** The pane a transfer or move from `side` should go to: the most recently
+    used visible pane other than itself. */
+export function otherSide(side: PaneSide): PaneSide {
+  const { activeOrder, paneCount } = useUiStore.getState();
+  return activeOrder.find((p) => p !== side && p < paneCount) ?? (side === 0 ? 1 : 0);
+}

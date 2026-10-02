@@ -325,6 +325,12 @@ const App = {
   async UpdateRepo() {
     return "cerkie/warpseed";
   },
+  async DragBase() {
+    return "";
+  },
+  async EnqueueUploadsFromPaths(siteId: number, paths: string[], remoteDir: string) {
+    return this.EnqueueUploads(siteId, paths.map((p) => ({ src: p, size: 0, isDir: false })), remoteDir);
+  },
   async PickFile() {
     return "C:\Users\you\.ssh\id_ed25519";
   },
@@ -656,7 +662,7 @@ export function installMock() {
     store: useUiStore,
     stop: () => window.clearInterval(iv),
     /** Attach a pane to a site (connects it first) at the given remote path. */
-    async openRemote(side: 0 | 1, siteId = CONNECTED_SITE_ID, path?: string) {
+    async openRemote(side: 0 | 1 | 2, siteId = CONNECTED_SITE_ID, path?: string) {
       await App.ConnectSite(siteId);
       const site = state.sites.find((s) => s.id === siteId);
       useUiStore.getState().setPane(side, siteId, path ?? site?.remotePath ?? "/");

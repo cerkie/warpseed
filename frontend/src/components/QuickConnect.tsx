@@ -107,7 +107,7 @@ export default function QuickConnect() {
               <div key={s.id} className="site-row" onClick={() => void connectExisting(s)}>
                 <span className="name">{s.name}</span>
                 <span className="host">
-                  {s.protocol === "ftps" ? "ftps://" : "sftp://"}{s.username}@{s.host}:{s.port}
+                  {s.protocol}://{s.username}@{s.host}:{s.port}
                 </span>
                 <button className="edit" title="Edit site" aria-label={`Edit ${s.name}`} onClick={(e) => startEdit(e, s)}>
                   <Pencil size={13} />

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import CommandPalette from "./components/CommandPalette";
-import FilePane from "./components/FilePane";
+import PaneArea from "./components/PaneArea";
 import DeckView from "./components/DeckView";
 import MiniView from "./components/MiniView";
 import TimelineView from "./components/TimelineView";
@@ -11,7 +11,7 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import UpdateBanner from "./components/UpdateBanner";
 import HostKeyDialog from "./components/HostKeyDialog";
 import HistoryDialog from "./components/HistoryDialog";
-import { Heart, Search, Shrink, Sliders, Slipstream } from "./components/Icon";
+import { Columns, Heart, Search, Shrink, Sliders, Slipstream } from "./components/Icon";
 import QueueDock from "./components/QueueDock";
 import QuickConnect from "./components/QuickConnect";
 import SettingsDialog from "./components/SettingsDialog";
@@ -21,6 +21,8 @@ import { COMPANY, DONATE_URL } from "./lib/branding";
 import { applyTheme, type ThemePref } from "./lib/theme";
 import { getPref, onPrefsHydrated, remoteSide, setPref } from "./lib/prefs";
 import { formOf } from "./lib/protocol";
+import { installFileDrop } from "./lib/fileDrop";
+import { initDragOut } from "./lib/dragOut";
 import {
   connectAndHome,
   list,
@@ -37,22 +39,17 @@ import {
   type TransferState,
   type FsChanged,
 } from "./ipc";
-import { useUiStore } from "./store";
+import { useUiStore, type PaneSide } from "./store";
 import "./App.css";
 
 // Set once the saved panes are back, so the defaults never get written over them.
 let savePanes = false;
 
-const SPLIT_MIN = 20;
-const SPLIT_MAX = 80;
-const clampSplit = (v: number) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v));
-const readSplit = () => {
-  const saved = Number(getPref("ui.pane_split"));
-  return saved >= SPLIT_MIN && saved <= SPLIT_MAX ? saved : 50;
-};
 
 export default function App() {
   const setPane = useUiStore((s) => s.setPane);
+  const paneCount = useUiStore((s) => s.paneCount);
+  const setPaneCount = useUiStore((s) => s.setPaneCount);
   const activePane = useUiStore((s) => s.activePane);
   const setActivePane = useUiStore((s) => s.setActivePane);
   const dbVersion = useUiStore((s) => s.dbSchemaVersion);
@@ -71,9 +68,6 @@ export default function App() {
   // gains its row.
   const [updateShown, setUpdateShown] = useState(false);
   // Left pane width as a percentage of the browse area; persisted on release.
-  const [split, setSplit] = useState(readSplit);
-  useEffect(() => onPrefsHydrated(() => setSplit(readSplit())), []);
-  const panesRef = useRef<HTMLDivElement>(null);
 
   // A desktop notification when the queue runs dry while the window is not in
   // front, so a long run can be left alone.
@@ -123,9 +117,9 @@ export default function App() {
   const setMiniMode = useUiStore((s) => s.setMiniMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
 
-  // A file dragged in from Explorer is not something warpseed can accept —
-  // dragging in and out is not supported — but WITHOUT this the webview
-  // takes the drop as a navigation and replaces the whole app with the
+  // A file dragged in from Explorer is uploaded when it lands on a server pane
+  // (see lib/fileDrop.ts). Anywhere else it is not wanted, but WITHOUT this the
+  // webview takes the drop as a navigation and replaces the whole app with the
   // file. There is no address bar to come back from, so the window is dead
   // until the user restarts it. The panes stopPropagation on the drags they
   // DO handle, so this only ever sees the ones nothing wanted.
@@ -191,9 +185,11 @@ export default function App() {
           donateNudged = cfg["ui.donate_nudged"] === "1";
           maybeNudge();
 
+          initDragOut();
+          installFileDrop();
           const start = await localStart(cfg["ui.local_default"]);
           const saved = readSavedPanes();
-          for (const side of [0, 1] as const) {
+          for (const side of [0, 1, 2] as const) {
             const prev = saved[side];
             const folder =
               prev?.source === "local" && (await list("local", prev.path).then(() => true, () => false))
@@ -228,6 +224,7 @@ export default function App() {
           const home = await localStart();
           setPane(0, "local", home);
           setPane(1, "local", home);
+          setPane(2, "local", home);
         }),
     );
     const lastConn: Record<number, string> = { ...useUiStore.getState().connStates };
@@ -299,7 +296,7 @@ export default function App() {
         // Never hijack Tab while a dialog is open — that would trap keyboard
         // users inside it with no way to reach its buttons.
         e.preventDefault();
-        setActivePane(useUiStore.getState().activePane === 0 ? 1 : 0);
+        setActivePane(((useUiStore.getState().activePane + 1) % useUiStore.getState().paneCount) as PaneSide);
       } else if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
@@ -393,6 +390,15 @@ export default function App() {
         </button>
         <button
           className="btn btn--icon"
+          title={paneCount === 3 ? "Hide the third pane" : "Show a third pane"}
+          aria-label={paneCount === 3 ? "Hide the third pane" : "Show a third pane"}
+          aria-pressed={paneCount === 3}
+          onClick={() => setPaneCount(paneCount === 3 ? 2 : 3)}
+        >
+          <Columns size={15} />
+        </button>
+        <button
+          className="btn btn--icon"
           title="Minimize to pill"
           aria-label="Minimize to an always-on-top pill"
           onClick={() => {
@@ -425,58 +431,7 @@ export default function App() {
         {connecting.length > 0 && <div className="app__connecting" role="progressbar" aria-label="Connecting" />}
         {/* Panes stay mounted (display:none) in flight mode so pane state,
             scroll position and virtualizer measurements survive the trip. */}
-        <div
-          className="app__panes"
-          ref={panesRef}
-          hidden={viewMode !== "browse"}
-          style={{ gridTemplateColumns: `minmax(0, ${split}fr) 8px minmax(0, ${100 - split}fr)` }}
-        >
-          <FilePane side={0} />
-          <div
-            className="app__splitter"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize panes"
-            aria-valuenow={Math.round(split)}
-            aria-valuemin={SPLIT_MIN}
-            aria-valuemax={SPLIT_MAX}
-            tabIndex={0}
-            title="Drag to resize, double-click to reset"
-            onPointerDown={(e) => {
-              const box = panesRef.current?.getBoundingClientRect();
-              if (!box || box.width <= 0) return;
-              e.preventDefault();
-              const el = e.currentTarget;
-              el.setPointerCapture(e.pointerId);
-              let last = split;
-              const move = (ev: PointerEvent) => {
-                last = clampSplit(((ev.clientX - box.left) / box.width) * 100);
-                setSplit(last);
-              };
-              const up = () => {
-                el.removeEventListener("pointermove", move);
-                el.removeEventListener("pointerup", up);
-                el.removeEventListener("pointercancel", up);
-                setPref("ui.pane_split", String(Math.round(last)));
-              };
-              el.addEventListener("pointermove", move);
-              el.addEventListener("pointerup", up);
-              el.addEventListener("pointercancel", up);
-            }}
-            onDoubleClick={() => {
-              setSplit(50);
-              setPref("ui.pane_split", "50");
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-              e.preventDefault();
-              const next = clampSplit(split + (e.key === "ArrowLeft" ? -2 : 2));
-              setSplit(next);
-              setPref("ui.pane_split", String(next));
-            }}
-          />
-          <FilePane side={1} />
-        </div>
+        <PaneArea hidden={viewMode !== "browse"} />
         {viewMode === "flight" && <FlightView />}
         {viewMode === "deck" && <DeckView />}
         {viewMode === "timeline" && <TimelineView />}
@@ -546,7 +501,7 @@ function readSavedPanes(): (SavedPane | undefined)[] {
 
 /** Put a pane back on the server folder it was showing, if the site still
     exists and the connection works; otherwise leave it where it is. */
-async function restoreRemote(side: 0 | 1, siteId: number, path: string, standIn: string) {
+async function restoreRemote(side: PaneSide, siteId: number, path: string, standIn: string) {
   try {
     if (!(await fetchSites()).some((s) => s.id === siteId)) return;
     const home = await connectAndHome(siteId, path);

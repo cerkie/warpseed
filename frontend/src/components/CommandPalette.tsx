@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { connectAndHome, disconnectSite, getSettings, localStart } from "../ipc";
 import { remoteSide } from "../lib/prefs";
-import { useUiStore } from "../store";
+import { useUiStore, type PaneSide } from "../store";
 import type { PaneCmd } from "./FilePane";
 import { queueCmd } from "./QueueDock";
 import {
   ArrowUp,
   Check,
+  Columns,
   ChevronRight,
   Close,
   Folder,
@@ -28,7 +29,7 @@ interface Item {
   run: () => void | Promise<void>;
 }
 
-function paneCmd(side: 0 | 1, cmd: PaneCmd["cmd"]) {
+function paneCmd(side: PaneSide, cmd: PaneCmd["cmd"]) {
   window.dispatchEvent(new CustomEvent("ws:panecmd", { detail: { side, cmd } }));
 }
 
@@ -79,6 +80,11 @@ export default function CommandPalette() {
         }),
       },
       { label: "New connection…", icon: <ChevronRight size={15} />, run: close(() => setQuickConnect(true, remoteSide())) },
+      {
+        label: useUiStore.getState().paneCount === 3 ? "Hide third pane" : "Show third pane",
+        icon: <Columns size={15} />,
+        run: close(() => useUiStore.getState().setPaneCount(useUiStore.getState().paneCount === 3 ? 2 : 3)),
+      },
       { label: "Transfer history", icon: <Check size={15} />, run: close(() => useUiStore.getState().setHistoryOpen(true)) },
       {
         label: "Settings",

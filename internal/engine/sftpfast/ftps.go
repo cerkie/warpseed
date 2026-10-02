@@ -50,11 +50,15 @@ type FTPSConfig struct {
 	// Implicit selects TLS from the first byte (usually port 990); otherwise
 	// the connection starts plain and upgrades with AUTH TLS.
 	Implicit bool
-	Timeout  time.Duration
-	Verify   func(certDER []byte) error
+	// Plain skips TLS entirely: ordinary FTP. Everything, including the
+	// password, crosses the network unencrypted.
+	Plain   bool
+	Timeout time.Duration
+	Verify  func(certDER []byte) error
 }
 
-// DialFTPS connects, secures the control and data channels, and logs in.
+// DialFTPS connects, secures the control and data channels (unless cfg.Plain),
+// and logs in.
 func DialFTPS(ctx context.Context, cfg FTPSConfig) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 15 * time.Second
@@ -96,13 +100,15 @@ func DialFTPS(ctx context.Context, cfg FTPSConfig) (*Client, error) {
 			fc.rawMu.Lock()
 			fc.raw = append(fc.raw, c)
 			fc.rawMu.Unlock()
-			if atomic.AddInt32(&dials, 1) == 1 && !cfg.Implicit {
+			if cfg.Plain || (atomic.AddInt32(&dials, 1) == 1 && !cfg.Implicit) {
 				return c, nil
 			}
 			return tls.Client(c, tlsCfg), nil
 		}),
 	}
-	if cfg.Implicit {
+	if cfg.Plain {
+		// no TLS options: the library speaks plain FTP
+	} else if cfg.Implicit {
 		opts = append(opts, ftp.DialWithTLS(tlsCfg))
 	} else {
 		opts = append(opts, ftp.DialWithExplicitTLS(tlsCfg))

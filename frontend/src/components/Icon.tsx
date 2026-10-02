@@ -186,3 +186,11 @@ export const Pencil = icon(
     <path d="M3.25 12.75 3.75 9.75 10.5 3l2.5 2.5-6.75 6.75z" />
   </>,
 );
+
+/** Three side-by-side panes. */
+export const Columns = icon(
+  <>
+    <path d="M2.25 3.25h11.5v9.5H2.25z" />
+    <path d="M6.1 3.25v9.5M9.9 3.25v9.5" />
+  </>,
+);

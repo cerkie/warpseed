@@ -23,6 +23,8 @@ import {
   EnqueueDownloads,
   LogDir,
   EnqueueUploads,
+  EnqueueUploadsFromPaths,
+  DragBase,
   GetSettings,
   AddBookmark,
   BackupData,
@@ -457,3 +459,12 @@ export const transferHistory = (): Promise<HistoryEntry[]> =>
 
 /** The repository update checks currently go to, e.g. "owner/repo". */
 export const updateRepo = (): Promise<string> => UpdateRepo();
+
+/** URL prefix of the local server that lets a file be dragged out to Explorer. */
+export const dragBase = (): Promise<string> => DragBase();
+
+export const enqueueUploadsFromPaths = (
+  siteId: number,
+  paths: string[],
+  remoteDir: string,
+): Promise<number[]> => EnqueueUploadsFromPaths(siteId, paths, remoteDir) as Promise<number[]>;

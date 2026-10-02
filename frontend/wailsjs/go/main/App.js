@@ -94,12 +94,20 @@ export function DismissUpdate(arg1) {
   return window['go']['main']['App']['DismissUpdate'](arg1);
 }
 
+export function DragBase() {
+  return window['go']['main']['App']['DragBase']();
+}
+
 export function EnqueueDownloads(arg1, arg2, arg3) {
   return window['go']['main']['App']['EnqueueDownloads'](arg1, arg2, arg3);
 }
 
 export function EnqueueUploads(arg1, arg2, arg3) {
   return window['go']['main']['App']['EnqueueUploads'](arg1, arg2, arg3);
+}
+
+export function EnqueueUploadsFromPaths(arg1, arg2, arg3) {
+  return window['go']['main']['App']['EnqueueUploadsFromPaths'](arg1, arg2, arg3);
 }
 
 export function GetSettings() {

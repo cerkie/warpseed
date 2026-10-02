@@ -1,6 +1,6 @@
 # warpseed
 
-A file transfer app for Windows. It connects over SFTP or FTPS, sends big files over several connections at once so a slow server or long route doesn't hold it back, and resumes interrupted transfers where they stopped. The queue survives crashes and restarts.
+A file transfer app for Windows. It connects over SFTP, FTPS or plain FTP, sends big files over several connections at once so a slow server or long route doesn't hold it back, and resumes interrupted transfers where they stopped. The queue survives crashes and restarts.
 
 This is the [cerkie/warpseed](https://github.com/cerkie/warpseed) fork of [ZyraLabs/warpseed](https://github.com/ZyraLabs/warpseed). Zyra Labs wrote the transfer engine, the queue and the design. The fork adds the features listed [below](#what-this-fork-adds). Bugs and ideas for the fork go in [this repo's issues](https://github.com/cerkie/warpseed/issues).
 
@@ -49,7 +49,7 @@ Mini mode shrinks the window to a small always-on-top pill while transfers keep 
 
 **The queue.** Everything you queue is stored in a local database, so a crash or restart picks up where it left off. Failures are handled by type: a network hiccup is retried after a short wait, a server that refuses extra connections gets fewer of them, and a wrong password or a changed server identity stops the transfer straight away.
 
-**SFTP and FTPS.** SFTP goes through Go's SSH and SFTP libraries and logs in with a password, a key file or the SSH agent. FTPS supports explicit and implicit TLS. Large FTPS downloads can use several connections too, but FTPS uploads use one connection per file, because the FTP protocol can't write into the middle of a remote file.
+**SFTP, FTPS and FTP.** SFTP goes through Go's SSH and SFTP libraries and logs in with a password, a key file or the SSH agent. FTPS supports explicit and implicit TLS. Large FTPS downloads can use several connections too, but FTPS uploads use one connection per file, because the FTP protocol can't write into the middle of a remote file.
 
 **Trust.** The first time you connect to a server, warpseed shows its SSH host key or TLS certificate fingerprint and asks whether to trust it. After that, a different key or certificate is treated as a warning, not retried. Passwords are kept in Windows Credential Manager, not in the app's database.
 
@@ -59,6 +59,9 @@ Mini mode shrinks the window to a small always-on-top pill while transfers keep 
 - **Faster FTPS downloads** over several connections, using the same settings as SFTP.
 - **Moving files.** Hold Shift while dragging, or press F6, to move files instead of copying them. It works between your PC and a server, and within either one.
 - **SSH key and SSH agent login** for SFTP.
+- **Plain FTP**, for servers that offer nothing else (unencrypted, so only use it on a network you trust).
+- **A third pane**, so you can have your PC and two servers open at once. Two is still the default.
+- **Drag and drop with Explorer.** Drop files on a server pane to upload them, or drag a file out of a pane to copy it to Explorer.
 - **It remembers your setup.** Each pane's folder, the divider position, and which pane your server goes in. Each site can also connect automatically when warpseed starts.
 - **A safer resume** for SFTP and FTPS: the end of a half-finished file is checked against the server before continuing.
 - **Quicker transfer starts.**

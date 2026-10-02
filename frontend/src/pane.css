@@ -616,3 +616,14 @@
   color: var(--text);
   background: var(--surface-3);
 }
+
+/* Server panes accept files dragged in from Explorer; the runtime marks the
+   target it is over with wails-drop-target-active. */
+.pane[data-site] .pane__list {
+  --wails-drop-target: drop;
+}
+.pane__list.wails-drop-target-active {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-glow);
+}

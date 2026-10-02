@@ -24,6 +24,8 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 18, G: 19, B: 20, A: 1},
+		// Files dragged in from Explorer arrive as paths (see frontend/src/lib/fileDrop.ts).
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		// NOT HideWindowOnClose: that branch skips OnBeforeClose entirely, and

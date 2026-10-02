@@ -27,10 +27,14 @@ type ftpsDriver struct {
 	listener net.Listener
 	tls      *tls.Config
 	implicit bool
+	plain    bool
 }
 
 func (d *ftpsDriver) GetSettings() (*ftpserver.Settings, error) {
 	req := ftpserver.MandatoryEncryption
+	if d.plain {
+		req = ftpserver.ClearOrEncrypted
+	}
 	if d.implicit {
 		req = ftpserver.ImplicitEncryption
 	}
@@ -48,6 +52,10 @@ func (d *ftpsDriver) AuthUser(_ ftpserver.ClientContext, user, pass string) (ftp
 
 // startFTPS runs an in-process FTPS server and returns its root and config.
 func startFTPS(t *testing.T, implicit bool) (string, FTPSConfig, []byte) {
+	return startFTPServer(t, implicit, false)
+}
+
+func startFTPServer(t *testing.T, implicit, plain bool) (string, FTPSConfig, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -70,7 +78,7 @@ func startFTPS(t *testing.T, implicit bool) (string, FTPSConfig, []byte) {
 	}
 	root := t.TempDir()
 	drv := &ftpsDriver{
-		root: root, listener: ln, implicit: implicit,
+		root: root, listener: ln, implicit: implicit, plain: plain,
 		tls: &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}},
 	}
 	if implicit {
@@ -82,7 +90,7 @@ func startFTPS(t *testing.T, implicit bool) (string, FTPSConfig, []byte) {
 
 	cfg := FTPSConfig{
 		Host: "127.0.0.1", Port: ln.Addr().(*net.TCPAddr).Port,
-		User: "u", Password: "p", Implicit: implicit, Timeout: 5 * time.Second,
+		User: "u", Password: "p", Implicit: implicit, Plain: plain, Timeout: 5 * time.Second,
 		Verify: func([]byte) error { return nil },
 	}
 	return root, cfg, der
@@ -326,5 +334,38 @@ func TestFTPSChunkedDownload(t *testing.T) {
 			t.Fatalf("resume=%v: progress %d, want %d", resume, got, want)
 		}
 		_ = os.Remove(dst)
+	}
+}
+
+// Plain FTP speaks no TLS at all, so it must work against a server that does
+// not offer it, and never ask the certificate verifier anything.
+func TestPlainFTPRoundTrip(t *testing.T) {
+	root, cfg, _ := startFTPServer(t, false, true)
+	cfg.Verify = func([]byte) error { t.Error("verifier called on a plain FTP connection"); return nil }
+	ctx := context.Background()
+	c, err := DialFTPS(ctx, cfg)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+
+	data := make([]byte, 700<<10)
+	_, _ = rand.Read(data)
+	src := filepath.Join(t.TempDir(), "src.bin")
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Upload(ctx, src, "/plain/f.bin", nil, nil); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "plain", "f.bin")); !bytes.Equal(got, data) {
+		t.Fatal("uploaded bytes differ")
+	}
+	dst := filepath.Join(t.TempDir(), "out.bin")
+	if err := c.Download(ctx, "/plain/f.bin", dst, nil, nil); err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	if got, _ := os.ReadFile(dst); !bytes.Equal(got, data) {
+		t.Fatal("downloaded bytes differ")
 	}
 }

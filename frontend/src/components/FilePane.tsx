@@ -35,7 +35,8 @@ import {
   shortenPath,
 } from "../lib/path";
 import { recentPaths, rememberPath } from "../lib/recents";
-import { useUiStore, type PaneSide } from "../store";
+import { otherSide, useUiStore, type PaneSide } from "../store";
+import { downloadUrl } from "../lib/dragOut";
 import Breadcrumb from "./Breadcrumb";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import DirTree from "./DirTree";
@@ -390,7 +391,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   const enqueueItems = useCallback(
     async (items: FsEntry[], move = false) => {
       if (typeof source !== "number" || !nav.listing) return;
-      const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
+      const other = useUiStore.getState().panes[otherSide(side)];
       if (other.source !== "local") {
         toast("error", "The other pane must be This PC to receive downloads");
         return;
@@ -427,7 +428,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   const uploadItems = useCallback(
     async (items: FsEntry[], move = false) => {
       if (source !== "local" || !nav.listing) return;
-      const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
+      const other = useUiStore.getState().panes[otherSide(side)];
       if (typeof other.source !== "number") {
         toast("error", "The other pane must be a connected site to receive uploads");
         return;
@@ -465,7 +466,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
       } else if (typeof source === "number") {
         void enqueueItems([e]); // double-click a remote file = download it
       } else {
-        const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
+        const other = useUiStore.getState().panes[otherSide(side)];
         if (typeof other.source === "number") {
           void uploadItems([e]); // double-click a local file = upload it
         } else {
@@ -614,6 +615,11 @@ export default function FilePane({ side }: { side: PaneSide }) {
         })),
       };
       ev.dataTransfer.setData(dragType, JSON.stringify(payload));
+      // A single file can also be dragged out to Explorer.
+      if (picked.length === 1 && !picked[0].isDir) {
+        const url = downloadUrl(payload.siteId, payload.base + picked[0].name, picked[0].name);
+        if (url) ev.dataTransfer.setData("DownloadURL", url);
+      }
       // Copy unless Shift is held at the drop; a plain copy leaves the source.
       ev.dataTransfer.effectAllowed = "copyMove";
     },
@@ -815,7 +821,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // filesystem, or copy-then-delete across the two kinds of pane.
   const moveSelection = useCallback(() => {
     const sel = selection();
-    const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
+    const other = useUiStore.getState().panes[otherSide(side)];
     if (sel.length === 0 || !nav.listing) {
       toast("error", "Nothing selected to move");
     } else if (source === "local" && typeof other.source === "number") {
@@ -1134,7 +1140,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
     const sel =
       marks.size && marks.has(entry.name) ? entries.filter((x) => marks.has(x.name)) : [entry];
     const count = sel.length > 1 ? ` (${sel.length})` : "";
-    const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
+    const other = useUiStore.getState().panes[otherSide(side)];
     const items: MenuItem[] = [];
     if (typeof source === "number") {
       items.push({
@@ -1323,6 +1329,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
   return (
     <section
       className={`pane ${isActive ? "pane--active" : ""}`}
+      data-pane={side}
+      data-site={typeof source === "number" ? source : undefined}
       onMouseDown={() => setActivePane(side)}
       aria-label={`File pane ${side + 1}`}
     >
@@ -1641,6 +1649,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
                 <div
                   key={vi.key}
                   className={cls}
+                  data-dir={e.isDir ? e.name : undefined}
                   style={{ transform: `translateY(${vi.start}px)` }}
                   onClick={(ev) => selectAt(vi.index, ev)}
                   onDoubleClick={() => open(e)}

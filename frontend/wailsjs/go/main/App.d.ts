@@ -51,9 +51,13 @@ export function DiskSpace(arg1:string):Promise<localfs.Space>;
 
 export function DismissUpdate(arg1:string):Promise<void>;
 
+export function DragBase():Promise<string>;
+
 export function EnqueueDownloads(arg1:number,arg2:Array<main.DownloadItem>,arg3:string):Promise<Array<number>>;
 
 export function EnqueueUploads(arg1:number,arg2:Array<main.UploadItem>,arg3:string):Promise<Array<number>>;
+
+export function EnqueueUploadsFromPaths(arg1:number,arg2:Array<string>,arg3:string):Promise<Array<number>>;
 
 export function GetSettings():Promise<Record<string, string>>;
 

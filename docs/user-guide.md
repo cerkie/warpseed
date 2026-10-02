@@ -554,3 +554,16 @@ press **F6**) to move them instead.
   you have cleared from the queue.
 - **Connect on launch** is a checkbox on each saved site.
 - **Columns:** right-click the column headings to hide Size or Modified.
+
+## Three panes, FTP, and dragging to and from Explorer
+
+- **Third pane.** The columns button in the header (or **Ctrl+K**, "Show third
+  pane") adds a third file pane. Tab cycles through the panes. **F5** and **F6**
+  send files to the pane you used most recently, and drag and drop works between
+  any two.
+- **Plain FTP.** Choose "FTP (no encryption)" when adding a connection. It sends
+  your password and files unencrypted, so only use it on a trusted network.
+- **Drag in from Explorer.** Drop files or folders onto a server pane to upload
+  them to the folder shown, or onto a folder row to upload into it.
+- **Drag out to Explorer.** Drag one file onto an Explorer window or the desktop
+  to copy it there. For several files or folders, use the queue.

@@ -886,3 +886,19 @@ func TestRequeueExceptHealsOrphansOnly(t *testing.T) {
 		t.Errorf("running row became %q", got.State)
 	}
 }
+
+func TestClearCompletedKeepsHistory(t *testing.T) {
+	s := openTestStore(t)
+	site := seedSite(t, s)
+	id, _ := s.EnqueueTransfer(Transfer{SiteID: site, Src: "/a", Dst: "/l/a", Size: 5})
+	if err := s.SetTransferState(id, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ClearCompleted(); err != nil || n != 1 {
+		t.Fatalf("ClearCompleted = %d, %v", n, err)
+	}
+	h, err := s.History(10)
+	if err != nil || len(h) != 1 || h[0].Src != "/a" || h[0].Size != 5 || h[0].SiteName == "" {
+		t.Fatalf("History = %+v, %v", h, err)
+	}
+}

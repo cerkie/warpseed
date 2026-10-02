@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -231,6 +232,15 @@ func (d *Dispatcher) refreshLimiter() {
 			limit = rate.Limit(observed * float64(pct) / 100)
 		}
 	}
+	// A scheduled slow-down can only tighten whatever the mode chose.
+	if d.store.Setting("bw.sched_on", "0") == "1" {
+		from, to := d.store.SettingInt("bw.sched_from", 9), d.store.SettingInt("bw.sched_to", 17)
+		if b := d.store.SettingInt("bw.sched_limit_bytes", 0); b > 0 && inScheduleWindow(time.Now().Hour(), from, to) {
+			if l := rate.Limit(b); limit == 0 || l < limit {
+				limit = l
+			}
+		}
+	}
 	d.limMu.Lock()
 	defer d.limMu.Unlock()
 	if limit == 0 {
@@ -418,7 +428,7 @@ func (d *Dispatcher) fits(siteID int64, streams, globalCap, siteCap int) bool {
 // streamsFor decides how many connections a transfer gets: >1 for files past
 // the chunking threshold, which each direction sets separately.
 func (d *Dispatcher) streamsFor(t queue.Transfer, siteCap int) int {
-	if t.Engine != "sftpfast" {
+	if t.Engine != "sftpfast" || (t.Direction == "upload" && d.isFTPS(t.SiteID)) {
 		return 1
 	}
 	minKey, streamKey := "transfers.chunk_min_mb", "transfers.chunk_streams"
@@ -678,6 +688,7 @@ func (d *Dispatcher) runTransfer(ctx context.Context, t queue.Transfer, streams 
 	applog.Debugf("dispatch: transfer %d: starting %s %s with %d stream(s)", t.ID, t.Direction, filepath.Base(t.Src), streams)
 
 	clients, err := d.factory(ctx, t.SiteID, streams)
+	applog.Debugf("dispatch: transfer %d: %d/%d connections ready after %s", t.ID, len(clients), streams, time.Since(started).Round(time.Millisecond))
 	if err != nil || len(clients) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no connections available")
@@ -809,6 +820,7 @@ func (d *Dispatcher) runTransfer(ctx context.Context, t queue.Transfer, streams 
 	// The engine reports the offset it actually resumed from, so bytes_done
 	// reflects reality even when the DB seed and the .wspart disagree.
 	onStart := func(offset int64) {
+		applog.Debugf("dispatch: transfer %d: data flowing %s after start (resuming at %d)", t.ID, time.Since(started).Round(time.Millisecond), offset)
 		progMu.Lock()
 		done = offset
 		progMu.Unlock()
@@ -919,6 +931,7 @@ func (d *Dispatcher) runTransfer(ctx context.Context, t queue.Transfer, streams 
 		}
 		d.sink.Emit("transfer:progress", map[string]any{"id": t.ID, "bytes": final, "size": t.Size})
 		d.emitStateSrc(t.ID, t.Src, "completed", "")
+		d.removeMovedSource(t, first(clients))
 		// A finished transfer changes a directory someone may be looking at.
 		d.sink.Emit("fs:changed", map[string]any{
 			"source": map[bool]string{true: "remote", false: "local"}[t.Direction == "upload"],
@@ -1490,4 +1503,76 @@ func (d *Dispatcher) emitStateSrc(id int64, src, state, errMsg string) {
 	}
 	d.sink.Emit("transfer:state", payload)
 	d.sink.Emit("queue:changed", nil)
+}
+
+// isFTPS reports whether a site speaks FTPS. FTP has no random-access writes,
+// so FTPS uploads run on one connection (downloads can still split via REST).
+func (d *Dispatcher) isFTPS(siteID int64) bool {
+	site, err := d.store.SiteByID(siteID)
+	return err == nil && site.Protocol == "ftps"
+}
+
+// removeMovedSource deletes the original of a completed move, then prunes the
+// folders that deleting it emptied, back to (and including) the folder the
+// user moved. Only an empty folder is ever removed here. A failure leaves the
+// original in place and says so: the copy is complete, so nothing is lost.
+func (d *Dispatcher) removeMovedSource(t queue.Transfer, c *sftpfast.Client) {
+	if t.MoveRoot == "" {
+		return
+	}
+	remote := t.Direction == "download" // the source is on the server
+	var err error
+	if remote {
+		err = c.RemoveRemote(t.Src)
+	} else {
+		err = os.Remove(t.Src)
+	}
+	if err != nil {
+		log.Printf("dispatch: move %d: delete original: %v", t.ID, err)
+		d.sink.Emit("app:error", fmt.Sprintf("Copied %s but could not delete the original: %v", baseName(t.Src, remote), err))
+		return
+	}
+	sep := string(filepath.Separator)
+	if remote {
+		sep = "/"
+	}
+	for dir := parentDir(t.Src, remote); len(dir) >= len(t.MoveRoot) && strings.HasPrefix(dir, t.MoveRoot); dir = parentDir(dir, remote) {
+		if dir != t.MoveRoot && !strings.HasPrefix(dir, t.MoveRoot+sep) {
+			break
+		}
+		if remote {
+			err = c.RemoveEmptyDir(dir)
+		} else {
+			err = os.Remove(dir)
+		}
+		if err != nil {
+			break // not empty yet (other files still moving) or not ours to remove
+		}
+	}
+	d.sink.Emit("fs:changed", map[string]any{
+		"source": map[bool]string{true: "remote", false: "local"}[remote],
+		"siteId": t.SiteID,
+		"dir":    parentDir(t.Src, remote),
+	})
+}
+
+func baseName(p string, remote bool) string {
+	if remote {
+		return path.Base(p)
+	}
+	return filepath.Base(p)
+}
+
+// inScheduleWindow reports whether hour falls in [from, to), wrapping past
+// midnight when to <= from (22 to 6 is overnight). from == to is an empty
+// window rather than all day, so a half-filled setting never throttles.
+func inScheduleWindow(hour, from, to int) bool {
+	switch {
+	case from == to:
+		return false
+	case from < to:
+		return hour >= from && hour < to
+	default:
+		return hour >= from || hour < to
+	}
 }

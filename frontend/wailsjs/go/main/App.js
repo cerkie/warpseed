@@ -22,6 +22,10 @@ export function BookmarksFor(arg1) {
   return window['go']['main']['App']['BookmarksFor'](arg1);
 }
 
+export function CancelQueuedTransfers() {
+  return window['go']['main']['App']['CancelQueuedTransfers']();
+}
+
 export function CancelQuit() {
   return window['go']['main']['App']['CancelQuit']();
 }
@@ -34,10 +38,6 @@ export function CancelTransfers(arg1) {
   return window['go']['main']['App']['CancelTransfers'](arg1);
 }
 
-export function CancelQueuedTransfers() {
-  return window['go']['main']['App']['CancelQueuedTransfers']();
-}
-
 export function CheckForUpdate() {
   return window['go']['main']['App']['CheckForUpdate']();
 }
@@ -46,12 +46,12 @@ export function ClearDoneTransfers() {
   return window['go']['main']['App']['ClearDoneTransfers']();
 }
 
-export function CloseToPill() {
-  return window['go']['main']['App']['CloseToPill']();
-}
-
 export function ClearFailedTransfers(arg1) {
   return window['go']['main']['App']['ClearFailedTransfers'](arg1);
+}
+
+export function CloseToPill() {
+  return window['go']['main']['App']['CloseToPill']();
 }
 
 export function ConfirmQuit() {
@@ -64,10 +64,6 @@ export function ConnectSite(arg1) {
 
 export function DataLocation() {
   return window['go']['main']['App']['DataLocation']();
-}
-
-export function DismissUpdate(arg1) {
-  return window['go']['main']['App']['DismissUpdate'](arg1);
 }
 
 export function DeleteBookmark(arg1) {
@@ -92,6 +88,10 @@ export function DisconnectSite(arg1) {
 
 export function DiskSpace(arg1) {
   return window['go']['main']['App']['DiskSpace'](arg1);
+}
+
+export function DismissUpdate(arg1) {
+  return window['go']['main']['App']['DismissUpdate'](arg1);
 }
 
 export function EnqueueDownloads(arg1, arg2, arg3) {
@@ -122,6 +122,10 @@ export function LocalRoots() {
   return window['go']['main']['App']['LocalRoots']();
 }
 
+export function LogDir() {
+  return window['go']['main']['App']['LogDir']();
+}
+
 export function MkdirLocal(arg1, arg2) {
   return window['go']['main']['App']['MkdirLocal'](arg1, arg2);
 }
@@ -134,12 +138,28 @@ export function MoveLocal(arg1, arg2, arg3) {
   return window['go']['main']['App']['MoveLocal'](arg1, arg2, arg3);
 }
 
+export function MoveRemote(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['MoveRemote'](arg1, arg2, arg3, arg4);
+}
+
+export function Notify(arg1, arg2) {
+  return window['go']['main']['App']['Notify'](arg1, arg2);
+}
+
 export function OpenDataFolder() {
   return window['go']['main']['App']['OpenDataFolder']();
 }
 
 export function PauseTransfer(arg1) {
   return window['go']['main']['App']['PauseTransfer'](arg1);
+}
+
+export function PickFile(arg1) {
+  return window['go']['main']['App']['PickFile'](arg1);
+}
+
+export function QueuePaused() {
+  return window['go']['main']['App']['QueuePaused']();
 }
 
 export function RemoteHome(arg1) {
@@ -154,12 +174,12 @@ export function RenameRemote(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['RenameRemote'](arg1, arg2, arg3, arg4);
 }
 
-export function ResolvePrompt(arg1, arg2) {
-  return window['go']['main']['App']['ResolvePrompt'](arg1, arg2);
-}
-
 export function ResolveConflicts(arg1, arg2) {
   return window['go']['main']['App']['ResolveConflicts'](arg1, arg2);
+}
+
+export function ResolvePrompt(arg1, arg2) {
+  return window['go']['main']['App']['ResolvePrompt'](arg1, arg2);
 }
 
 export function ResumeTransfer(arg1) {
@@ -178,24 +198,16 @@ export function SchemaVersion() {
   return window['go']['main']['App']['SchemaVersion']();
 }
 
-export function LogDir() {
-  return window['go']['main']['App']['LogDir']();
-}
-
 export function SetMiniMode(arg1) {
   return window['go']['main']['App']['SetMiniMode'](arg1);
-}
-
-export function SetSetting(arg1, arg2) {
-  return window['go']['main']['App']['SetSetting'](arg1, arg2);
 }
 
 export function SetQueuePaused(arg1) {
   return window['go']['main']['App']['SetQueuePaused'](arg1);
 }
 
-export function QueuePaused() {
-  return window['go']['main']['App']['QueuePaused']();
+export function SetSetting(arg1, arg2) {
+  return window['go']['main']['App']['SetSetting'](arg1, arg2);
 }
 
 export function SetSiteRemotePath(arg1, arg2) {
@@ -206,6 +218,14 @@ export function Sites() {
   return window['go']['main']['App']['Sites']();
 }
 
+export function TransferHistory() {
+  return window['go']['main']['App']['TransferHistory']();
+}
+
 export function TransfersList() {
   return window['go']['main']['App']['TransfersList']();
+}
+
+export function UpdateRepo() {
+  return window['go']['main']['App']['UpdateRepo']();
 }

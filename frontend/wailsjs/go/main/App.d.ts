@@ -15,29 +15,27 @@ export function BackupData():Promise<string>;
 
 export function BookmarksFor(arg1:number):Promise<Array<queue.Bookmark>>;
 
+export function CancelQueuedTransfers():Promise<number>;
+
 export function CancelQuit():Promise<void>;
 
 export function CancelTransfer(arg1:number):Promise<void>;
 
 export function CancelTransfers(arg1:Array<number>):Promise<number>;
 
-export function CancelQueuedTransfers():Promise<number>;
-
-export function CheckForUpdate():Promise<{current:string;latest:string;url:string;available:boolean;dismissed:boolean}>;
+export function CheckForUpdate():Promise<main.UpdateInfo>;
 
 export function ClearDoneTransfers():Promise<main.ClearResult>;
 
-export function CloseToPill():Promise<void>;
-
 export function ClearFailedTransfers(arg1:Array<number>):Promise<main.ClearResult>;
+
+export function CloseToPill():Promise<void>;
 
 export function ConfirmQuit():Promise<void>;
 
 export function ConnectSite(arg1:number):Promise<void>;
 
 export function DataLocation():Promise<main.DataInfo>;
-
-export function DismissUpdate(arg1:string):Promise<void>;
 
 export function DeleteBookmark(arg1:number):Promise<void>;
 
@@ -49,7 +47,9 @@ export function DeleteSite(arg1:number):Promise<void>;
 
 export function DisconnectSite(arg1:number):Promise<void>;
 
-export function DiskSpace(arg1:string):Promise<{free:number;total:number}>;
+export function DiskSpace(arg1:string):Promise<localfs.Space>;
+
+export function DismissUpdate(arg1:string):Promise<void>;
 
 export function EnqueueDownloads(arg1:number,arg2:Array<main.DownloadItem>,arg3:string):Promise<Array<number>>;
 
@@ -65,15 +65,25 @@ export function LocalHome():Promise<string>;
 
 export function LocalRoots():Promise<Array<localfs.Root>>;
 
+export function LogDir():Promise<string>;
+
 export function MkdirLocal(arg1:string,arg2:string):Promise<void>;
 
 export function MkdirRemote(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function MoveLocal(arg1:Array<string>,arg2:string,arg3:string):Promise<number>;
 
+export function MoveRemote(arg1:number,arg2:Array<string>,arg3:string,arg4:string):Promise<number>;
+
+export function Notify(arg1:string,arg2:string):Promise<void>;
+
 export function OpenDataFolder():Promise<void>;
 
 export function PauseTransfer(arg1:number):Promise<void>;
+
+export function PickFile(arg1:string):Promise<string>;
+
+export function QueuePaused():Promise<boolean>;
 
 export function RemoteHome(arg1:number):Promise<string>;
 
@@ -81,9 +91,9 @@ export function RenameLocal(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RenameRemote(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 
-export function ResolvePrompt(arg1:string,arg2:boolean):Promise<void>;
-
 export function ResolveConflicts(arg1:Array<number>,arg2:string):Promise<main.ConflictResult>;
+
+export function ResolvePrompt(arg1:string,arg2:boolean):Promise<void>;
 
 export function ResumeTransfer(arg1:number):Promise<void>;
 
@@ -93,18 +103,18 @@ export function SaveSite(arg1:queue.Site,arg2:string):Promise<queue.Site>;
 
 export function SchemaVersion():Promise<number>;
 
-export function LogDir():Promise<string>;
-
 export function SetMiniMode(arg1:boolean):Promise<void>;
-
-export function SetSetting(arg1:string,arg2:string):Promise<void>;
 
 export function SetQueuePaused(arg1:boolean):Promise<void>;
 
-export function QueuePaused():Promise<boolean>;
+export function SetSetting(arg1:string,arg2:string):Promise<void>;
 
 export function SetSiteRemotePath(arg1:number,arg2:string):Promise<void>;
 
 export function Sites():Promise<Array<queue.Site>>;
 
+export function TransferHistory():Promise<Array<queue.HistoryEntry>>;
+
 export function TransfersList():Promise<Array<queue.Transfer>>;
+
+export function UpdateRepo():Promise<string>;

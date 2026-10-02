@@ -20,10 +20,16 @@ func validName(name string) error {
 	return nil
 }
 
-// Delete removes files and directories (recursively for directories).
-// It reports how many entries were removed and the first failure, so the UI
-// can refresh even on a partial success.
-func Delete(paths []string) (int, error) {
+// Delete removes files and directories (recursively for directories),
+// permanently. It reports how many entries were removed and the first
+// failure, so the UI can refresh even on a partial success.
+func Delete(paths []string) (int, error) { return removeAll(paths, os.RemoveAll) }
+
+// Trash does what Delete does, but sends each entry to the Recycle Bin where
+// the platform has one, so a mistaken delete can be undone.
+func Trash(paths []string) (int, error) { return removeAll(paths, sendToTrash) }
+
+func removeAll(paths []string, remove func(string) error) (int, error) {
 	removed := 0
 	for _, p := range paths {
 		abs, err := filepath.Abs(p)
@@ -40,7 +46,7 @@ func Delete(paths []string) (int, error) {
 		if _, err := os.Lstat(abs); err != nil {
 			return removed, fmt.Errorf("delete %q: %w", filepath.Base(abs), err)
 		}
-		if err := os.RemoveAll(abs); err != nil {
+		if err := remove(abs); err != nil {
 			return removed, fmt.Errorf("delete %q: %w", filepath.Base(abs), err)
 		}
 		removed++
@@ -76,6 +82,9 @@ func Move(paths []string, destDir string) (int, error) {
 			return moved, fmt.Errorf("resolve %q: %w", p, err)
 		}
 		dst := filepath.Join(destDir, filepath.Base(src))
+		if strings.HasPrefix(dst, src+string(filepath.Separator)) {
+			return moved, fmt.Errorf("cannot move %q into itself", filepath.Base(src))
+		}
 		if src == dst {
 			continue
 		}

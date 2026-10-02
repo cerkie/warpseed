@@ -185,8 +185,7 @@
 .app__panes {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) 8px minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
 }
@@ -349,4 +348,51 @@
 }
 .app--mini > .mini {
   grid-row: 1 / -1;
+}
+
+.app__splitter {
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: background var(--dur-instant);
+}
+.app__splitter:hover,
+.app__splitter:focus-visible,
+.app__splitter:active {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  outline: none;
+}
+
+/* A slim indeterminate bar along the top of the main area while a server
+   connection is being made. */
+.app__main {
+  position: relative;
+}
+.app__connecting {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  z-index: 2;
+  pointer-events: none;
+}
+.app__connecting::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: connecting-slide 1.1s ease-in-out infinite;
+}
+@keyframes connecting-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(350%);
+  }
 }

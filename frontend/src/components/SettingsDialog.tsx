@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   backupData,
   dataLocation,
-  deleteSite,
   getSettings,
   openDataFolder,
   logDir,
@@ -14,17 +13,31 @@ import {
   type Site,
   appVersion,
   checkForUpdate,
+  updateRepo,
 } from "../ipc";
 import { COMPANY, DONATE_URL, WEBSITE_URL, bugReportUrl } from "../lib/branding";
 import { formatSize } from "../lib/format";
-import { forgetSource } from "../lib/recents";
 import { applyTheme, coerceTheme, THEMES, type ThemePref } from "../lib/theme";
+import { DEFAULT_FORM, DEFAULT_PORT, formFields, formOf, secretLabel, type SiteForm } from "../lib/protocol";
+import ProtocolField from "./ProtocolField";
+import { askDeleteSite } from "../lib/sites";
+import Switch from "./Switch";
+import { friendlyError } from "../lib/errors";
+import { setPref } from "../lib/prefs";
+import AutoConnectField from "./AutoConnectField";
 import { useUiStore } from "../store";
-import { Bug, ChevronRight, Heart } from "./Icon";
+import { Bug, ChevronRight, Close, Heart } from "./Icon";
 
 const MIB = 1024 * 1024;
 
-interface SiteDraft {
+const TABS = [
+  { id: "general", label: "General" },
+  { id: "transfers", label: "Transfers" },
+  { id: "sites", label: "Sites" },
+  { id: "about", label: "Data & About" },
+] as const;
+
+interface SiteDraft extends SiteForm {
   id: number;
   name: string;
   host: string;
@@ -45,8 +58,21 @@ function draftFrom(s: Site): SiteDraft {
     remotePath: s.remotePath ?? "",
     maxTransfers: s.maxTransfers ?? 0,
     password: "",
+    ...formOf(s),
   };
 }
+
+const blankDraft = (): SiteDraft => ({
+  id: 0,
+  name: "",
+  host: "",
+  port: DEFAULT_PORT.sftp,
+  username: "",
+  remotePath: "",
+  maxTransfers: 0,
+  password: "",
+  ...DEFAULT_FORM,
+});
 
 /** Settings (Ctrl+,): Appearance, Transfers, Bandwidth, and the site editor
     (feedback batch items 1, 2, 7, 8, 9). Values save on change. */
@@ -69,20 +95,23 @@ export default function SettingsDialog() {
   const setSites = useUiStore((s) => s.setSites);
 
   const [cfg, setCfg] = useState<Record<string, string>>({});
+  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("general");
   const [data, setData] = useState<DataInfo | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [draft, setDraft] = useState<SiteDraft | null>(null);
   const [siteMsg, setSiteMsg] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
   // One source for the running build: the Go side, which reads wails.json.
   const [version, setVersion] = useState("");
   const [updateMsg, setUpdateMsg] = useState("");
   const [checking, setChecking] = useState(false);
+  const [repo, setRepo] = useState("");
+  useEffect(() => {
+    void updateRepo().then(setRepo).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     setSiteMsg("");
-    setConfirmDelete(false);
     void getSettings().then(setCfg).catch(() => setCfg({}));
     void appVersion().then(setVersion).catch(() => setVersion("unknown"));
     setUpdateMsg("");
@@ -173,15 +202,19 @@ export default function SettingsDialog() {
 
   const saveDraft = async () => {
     if (!draft) return;
+    if (!draft.host.trim()) {
+      setSiteMsg("Enter a host to connect to.");
+      return;
+    }
     setSiteMsg("");
     try {
       await saveSite(
         {
           id: draft.id,
-          name: draft.name.trim(),
-          protocol: "sftp",
+          name: draft.name.trim() || draft.host.trim(),
+          ...formFields(draft),
           host: draft.host.trim(),
-          port: Number(draft.port) || 22,
+          port: Number(draft.port) || DEFAULT_PORT[draft.mode],
           username: draft.username.trim(),
           remotePath: draft.remotePath.trim(),
           maxTransfers: Number(draft.maxTransfers) || 0,
@@ -196,29 +229,21 @@ export default function SettingsDialog() {
     }
   };
 
-  const removeDraftSite = async () => {
-    if (!draft) return;
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
-    try {
-      await deleteSite(draft.id);
-      // SQLite recycles rowids, so this site's jump list must go with it.
-      forgetSource(draft.id);
-      setSites(await fetchSites());
-      setDraft(null);
-      setConfirmDelete(false);
-      setSiteMsg("Site deleted.");
-    } catch (err) {
-      setSiteMsg(String(err));
-    }
-  };
+  const removeSite = (s: Pick<Site, "id" | "name">) =>
+    askDeleteSite(
+      s,
+      () => {
+        setDraft(null);
+        setSiteMsg("Site deleted.");
+      },
+      (err) => setSiteMsg(friendlyError(err)),
+    );
 
   return (
     <div className="scrim scrim--center" onMouseDown={() => setOpen(false)}>
       <div
         className="dialog dialog--settings"
+        data-tab={tab}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
@@ -231,7 +256,21 @@ export default function SettingsDialog() {
       >
         <h2>Settings</h2>
 
-        <section className="set-section">
+        <div className="set-tabs" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              className={tab === t.id ? "set-tab set-tab--on" : "set-tab"}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <section className="set-section" data-tab="general">
           <h3>Appearance</h3>
           <div className="themes" role="radiogroup" aria-label="Theme">
             {THEMES.map((t) => (
@@ -257,7 +296,7 @@ export default function SettingsDialog() {
           </p>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="transfers">
           <h3>Transfers</h3>
           <p className="set-note set-blurb">
             These are connection budgets, not file counts. A Hyperlane file spends one
@@ -291,7 +330,7 @@ export default function SettingsDialog() {
           </p>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="transfers">
           <h3>When the file already exists</h3>
           <p className="set-note set-blurb">
             Checked before the transfer starts, not after it. &ldquo;Ask&rdquo; holds the
@@ -319,7 +358,7 @@ export default function SettingsDialog() {
           </p>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="transfers">
           <h3>Hyperlane · Downloads</h3>
           <p className="set-note set-blurb">
             Splits one large file across several connections at once, so a server that
@@ -354,7 +393,7 @@ export default function SettingsDialog() {
           </div>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="transfers">
           <h3>Hyperlane · Uploads</h3>
           <div className="set-row">
             <label>Lanes per file</label>
@@ -388,7 +427,7 @@ export default function SettingsDialog() {
           </p>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="general">
           <h3>Closing</h3>
           <div
             className="segmented"
@@ -421,7 +460,7 @@ export default function SettingsDialog() {
           </p>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="general">
           <h3>Queue on launch</h3>
           <div className="segmented" role="radiogroup" aria-label="Queue on launch">
             {[
@@ -447,7 +486,22 @@ export default function SettingsDialog() {
           </p>
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="general">
+          <h3>Notifications</h3>
+          <label className="set-check">
+            <input
+              type="checkbox"
+              checked={cfg["ui.notify"] !== "0"}
+              onChange={(e) => {
+                put("ui.notify", e.target.checked ? "1" : "0");
+                setPref("ui.notify", e.target.checked ? "1" : "0");
+              }}
+            />
+            Tell me when the queue finishes while warpseed is in the background
+          </label>
+        </section>
+
+        <section className="set-section" data-tab="transfers">
           <h3>Bandwidth</h3>
           <div className="segmented" role="radiogroup" aria-label="Bandwidth limit mode">
             {[
@@ -500,11 +554,54 @@ export default function SettingsDialog() {
               </span>
             </div>
           )}
+          <label className="set-check">
+            <input
+              type="checkbox"
+              checked={cfg["bw.sched_on"] === "1"}
+              onChange={(e) => put("bw.sched_on", e.target.checked ? "1" : "0")}
+            />
+            Slow down during set hours
+          </label>
+          {cfg["bw.sched_on"] === "1" && (
+            <div className="set-row">
+              <span className="set-inline">
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={cfg["bw.sched_from"] ?? "9"}
+                  onChange={(e) => put("bw.sched_from", e.target.value)}
+                />
+                <span className="set-note">to</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={cfg["bw.sched_to"] ?? "17"}
+                  onChange={(e) => put("bw.sched_to", e.target.value)}
+                />
+                <span className="set-note">o'clock, at most</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={
+                    Number(cfg["bw.sched_limit_bytes"] || 0) > 0
+                      ? Math.round(Number(cfg["bw.sched_limit_bytes"]) / MIB)
+                      : ""
+                  }
+                  placeholder="MiB/s"
+                  onChange={(e) => put("bw.sched_limit_bytes", String(Math.max(1, Number(e.target.value)) * MIB))}
+                />
+                <span className="set-note">MiB/s</span>
+              </span>
+            </div>
+          )}
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="sites">
           <h3>Sites</h3>
           {!draft ? (
+            <>
             <div className="site-list">
               {siteList.length === 0 && <span className="set-note">No saved sites yet.</span>}
               {siteList.map((s) => (
@@ -515,12 +612,28 @@ export default function SettingsDialog() {
                     {s.remotePath ? ` → ${s.remotePath}` : ""}
                   </span>
                   <span className="set-note site-row__go">edit <ChevronRight size={11} /></span>
+                  <button
+                    className="del"
+                    title="Delete site"
+                    aria-label={`Delete ${s.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeSite(s);
+                    }}
+                  >
+                    <Close size={13} />
+                  </button>
                 </div>
               ))}
             </div>
+            <button className="btn" style={{ marginTop: "var(--sp-2)" }} onClick={() => setDraft(blankDraft())}>
+              Add site
+            </button>
+            </>
           ) : (
             <>
               <div className="form-grid">
+                <ProtocolField form={draft} port={Number(draft.port)} onChange={(next, port) => setDraft({ ...draft, ...next, port })} />
                 <div className="field">
                   <label>Site name</label>
                   <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
@@ -544,8 +657,9 @@ export default function SettingsDialog() {
                     onChange={(e) => setDraft({ ...draft, username: e.target.value })}
                   />
                 </div>
+                {secretLabel(draft) && (
                 <div className="field">
-                  <label>Password</label>
+                  <label>{secretLabel(draft)}</label>
                   <input
                     type="password"
                     placeholder="(unchanged)"
@@ -553,6 +667,7 @@ export default function SettingsDialog() {
                     onChange={(e) => setDraft({ ...draft, password: e.target.value })}
                   />
                 </div>
+                )}
                 <div className="field">
                   <label>Initial remote path</label>
                   <input
@@ -571,11 +686,14 @@ export default function SettingsDialog() {
                     onChange={(e) => setDraft({ ...draft, maxTransfers: Number(e.target.value) || 0 })}
                   />
                 </div>
+                <AutoConnectField checked={draft.autoConnect} onChange={(autoConnect) => setDraft({ ...draft, autoConnect })} />
               </div>
               <div className="dialog__actions">
-                <button className="btn btn--danger" onClick={() => void removeDraftSite()}>
-                  {confirmDelete ? "Really delete?" : "Delete site"}
-                </button>
+                {draft.id !== 0 && (
+                  <button className="btn btn--danger" onClick={() => removeSite(draft)}>
+                    Delete site
+                  </button>
+                )}
                 <span style={{ flex: 1 }} />
                 <button className="btn" onClick={() => setDraft(null)}>
                   Back
@@ -589,7 +707,7 @@ export default function SettingsDialog() {
           {siteMsg && <div className="set-note set-msg">{siteMsg}</div>}
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="about">
           <h3>Data</h3>
           <p className="set-note set-blurb">
             Sites, bookmarks, the transfer queue, pinned host keys and every setting
@@ -607,6 +725,15 @@ export default function SettingsDialog() {
           <div className="dialog__actions" style={{ marginTop: "var(--sp-2)" }}>
             <button className="btn" onClick={() => void openDataFolder().catch(() => undefined)}>
               Open folder
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setOpen(false);
+                useUiStore.getState().setHistoryOpen(true);
+              }}
+            >
+              Transfer history
             </button>
             <span style={{ flex: 1 }} />
             <button
@@ -637,21 +764,42 @@ export default function SettingsDialog() {
           )}
         </section>
 
-        <section className="set-section">
+        <section className="set-section" data-tab="about">
           <h3>About</h3>
           <p className="set-note set-blurb">
             warpseed {version} — a free, fast seedbox transfer client by {COMPANY}.
           </p>
-          <div className="set-row">
-            <label>Tell me about new versions</label>
-            <input
-              type="checkbox"
+          <div className="update-card">
+            <Switch
               checked={(cfg["updates.check"] ?? "1") === "1"}
-              onChange={(e) => put("updates.check", e.target.checked ? "1" : "0")}
-            />
-          </div>
-          <div className="set-row">
-            <label>
+              onChange={(on) => put("updates.check", on ? "1" : "0")}
+            >
+              Check for updates when warpseed starts
+            </Switch>
+            <div className="update-card__row">
+              <span className="set-note">Look for releases from</span>
+              <div className="segmented" role="radiogroup" aria-label="Where to check for updates">
+                {[
+                  ["fork", "This fork"],
+                  ["upstream", "Original"],
+                ].map(([v, label]) => (
+                  <button
+                    key={v}
+                    className={(cfg["updates.source"] ?? "fork") === v ? "seg--on" : ""}
+                    role="radio"
+                    aria-checked={(cfg["updates.source"] ?? "fork") === v}
+                    onClick={() => {
+                      put("updates.source", v);
+                      setUpdateMsg("");
+                      setTimeout(() => void updateRepo().then(setRepo), 150);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="update-card__row">
               <button
                 className="btn"
                 disabled={checking}
@@ -668,23 +816,21 @@ export default function SettingsDialog() {
                           : `You are on the latest version (${u.current}).`,
                       );
                     })
-                    .catch(() => setUpdateMsg("Could not reach GitHub. Try again later."))
+                    .catch((err: unknown) => setUpdateMsg(friendlyError(err)))
                     .finally(() => setChecking(false));
                 }}
               >
                 {checking ? "Checking…" : "Check now"}
               </button>
-            </label>
-            {updateMsg && <span className="set-note">{updateMsg}</span>}
+              <span className="set-note">{updateMsg || (repo ? `Checks github.com/${repo}` : "")}</span>
+            </div>
           </div>
           <p className="set-note">
-            Checks GitHub once per run for a newer release. It sends no
-            identifiers and no usage data — the request says nothing about you
-            beyond asking a public page what the latest version is. warpseed
-            never downloads or replaces itself; the button opens the release
-            page and you choose.
-            It is free and always will be; if it saves you time, a coffee keeps the
-            updates coming.
+            One check per launch. It sends no identifiers and no usage data: the
+            request only asks a public page what the latest version is. warpseed
+            never downloads or replaces itself; the banner opens the release
+            page and you choose. It is free and always will be; if it saves you
+            time, a coffee keeps the updates coming.
           </p>
           <div className="dialog__actions" style={{ marginTop: "var(--sp-2)" }}>
             <button className="btn" onClick={() => openExternal(WEBSITE_URL)}>

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
+	"github.com/wailsapp/wails/v2/pkg/options"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"warpseed/internal/applog"
@@ -48,6 +49,9 @@ type App struct {
 
 	mu       sync.Mutex
 	sessions map[int64]*sftpfast.Client // browse connection per connected site
+
+	notifyOnce sync.Once
+	notifyErr  error
 
 	mini         bool // window currently shrunk to the pill
 	miniW, miniH int  // window geometry to restore when mini mode ends
@@ -176,52 +180,14 @@ func (a *App) dialTransfers(ctx context.Context, siteID int64, n int) ([]*sftpfa
 			password = p
 		}
 	}
-	cfg := sftpfast.Config{
-		Host:     site.Host,
-		Port:     site.Port,
-		User:     site.Username,
-		Password: password,
-	}
-	hostKey := a.hostkeys.Callback(siteID, nil)
 
-	clients := make([]*sftpfast.Client, 0, n)
-	for i := 0; i < n; i++ {
-		// Cancellation is checked BETWEEN dials only. Aborting a connection
-		// that is open but has not yet authenticated is exactly what
-		// OpenSSH's PerSourcePenalties (on by default since 9.8) punishes —
-		// enough of them and the server refuses this IP for minutes.
-		if ctx.Err() != nil {
-			break
-		}
-		if i > 0 {
-			time.Sleep(dialStagger)
-			if ctx.Err() != nil {
-				break
-			}
-		}
-
-		// Cap concurrent handshakes process-wide: the server's MaxStartups
-		// counter is global, and several transfers may be dialling at once.
-		dialGate <- struct{}{}
-		c, derr := sftpfast.Dial(ctx, cfg, hostKey)
-		<-dialGate
-
-		if derr != nil {
-			// The first connection is mandatory; refusals beyond it just
-			// mean the server won't grant more, so run with what we have
-			// rather than retrying into a penalty.
-			if i == 0 {
-				return nil, derr
-			}
-			log.Printf("dispatch: site %d granted %d/%d connections: %v", siteID, i, n, derr)
-			break
-		}
-		clients = append(clients, c)
+	// SSH servers count unauthenticated connections (MaxStartups), so starts
+	// are spaced; FTPS has no such penalty and goes all at once.
+	stagger := dialStagger
+	if site.Protocol == "ftps" {
+		stagger = 0
 	}
-	if len(clients) == 0 {
-		return nil, ctx.Err()
-	}
-	return clients, nil
+	return a.dialAll(ctx, siteID, site, password, n, stagger)
 }
 
 // dialGate bounds concurrent SSH handshakes across the whole app. OpenSSH's
@@ -403,6 +369,13 @@ func (a *App) SaveSite(site queue.Site, password string) (queue.Site, error) {
 			if site.CredRef == "" {
 				site.CredRef = prev.CredRef
 			}
+			if site.Protocol == "" {
+				site.Protocol = prev.Protocol
+			}
+			if site.Protocol != prev.Protocol || (site.OptionsJSON != "" && parseSiteOptions(site.OptionsJSON).sessionKey() != parseSiteOptions(prev.OptionsJSON).sessionKey()) {
+				// The open browse session speaks the old protocol.
+				defer a.DisconnectSite(site.ID)
+			}
 			if site.OptionsJSON == "" {
 				site.OptionsJSON = prev.OptionsJSON
 			}
@@ -480,7 +453,8 @@ func (a *App) ConnectSite(id int64) error {
 		}
 	}
 
-	hostKeyCB := a.hostkeys.Callback(id, func(algo, fingerprint string) bool {
+	a.emitConnState(id, "connecting")
+	client, err := a.dialSite(a.ctx, id, site, password, func(algo, fingerprint string) bool {
 		return a.broker.Ask("hostkey", map[string]any{
 			"siteId":      id,
 			"host":        site.Host,
@@ -488,14 +462,6 @@ func (a *App) ConnectSite(id int64) error {
 			"fingerprint": fingerprint,
 		})
 	})
-
-	a.emitConnState(id, "connecting")
-	client, err := sftpfast.Dial(a.ctx, sftpfast.Config{
-		Host:     site.Host,
-		Port:     site.Port,
-		User:     site.Username,
-		Password: password,
-	}, hostKeyCB)
 	if err != nil {
 		a.emitConnState(id, "error")
 		return fmt.Errorf("connect %s: %w", site.Name, err)
@@ -647,9 +613,9 @@ func (a *App) RemoteHome(id int64) (string, error) {
 // Each returns after the change lands so the caller can refresh, and emits
 // fs:changed so any pane showing that directory updates itself.
 
-// DeleteLocal removes local files/folders (recursive for folders).
+// DeleteLocal sends local files/folders to the Recycle Bin (recursive for folders).
 func (a *App) DeleteLocal(paths []string, dir string) (int, error) {
-	n, err := localfs.Delete(paths)
+	n, err := localfs.Trash(paths)
 	a.emitFsChanged("local", 0, dir)
 	return n, err
 }
@@ -755,6 +721,8 @@ type DownloadItem struct {
 	// overwrite policy needs it to tell a better copy from a downgrade;
 	// empty or unparseable simply means "unknown".
 	ModTime string `json:"modTime"`
+	// Move deletes the original once the copy has completed and been verified.
+	Move bool `json:"move"`
 }
 
 // UploadItem is one local file or folder selected for upload.
@@ -762,6 +730,7 @@ type UploadItem struct {
 	Src   string `json:"src"`
 	Size  int64  `json:"size"`
 	IsDir bool   `json:"isDir"`
+	Move  bool   `json:"move"`
 }
 
 // unixFromRFC3339 turns a listing timestamp into the policy's clock.
@@ -1052,6 +1021,7 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 			Src:    it.Src,
 			Dst:    filepath.Join(localDir, name),
 			Size:   it.Size,
+			MoveRoot: moveRoot(it.Move, it.Src),
 		}, queue.FileFacts{Size: it.Size, Mtime: unixFromRFC3339(it.ModTime)}, nil)
 		if err != nil {
 			return ids, err
@@ -1099,7 +1069,7 @@ func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []Dow
 				return nil
 			}
 			id, err := a.enqueueWithPolicy(queue.Transfer{
-				SiteID: siteID, Src: remote, Dst: dst, Size: size,
+				SiteID: siteID, Src: remote, Dst: dst, Size: size, MoveRoot: moveRoot(dir.Move, root),
 			}, queue.FileFacts{Size: size, Mtime: mtime}, nil)
 			if err != nil {
 				return err
@@ -1153,6 +1123,7 @@ func (a *App) EnqueueUploads(siteID int64, items []UploadItem, remoteDir string)
 			Src:       it.Src,
 			Dst:       path.Join(remoteDir, filepath.Base(it.Src)),
 			Size:      it.Size,
+			MoveRoot:  moveRoot(it.Move, it.Src),
 		}, localFacts(it.Src, it.Size), upClient)
 		if err != nil {
 			return ids, err
@@ -1223,7 +1194,7 @@ func (a *App) expandLocalDirs(siteID int64, dirs []UploadItem, remoteDir string)
 			}
 			dst := path.Join(remoteDir, filepath.Base(root), filepath.ToSlash(rel))
 			id, eerr := a.enqueueWithPolicyCached(queue.Transfer{
-				SiteID: siteID, Direction: "upload", Src: p, Dst: dst, Size: info.Size(),
+				SiteID: siteID, Direction: "upload", Src: p, Dst: dst, Size: info.Size(), MoveRoot: moveRoot(dir.Move, root),
 			}, queue.FileFacts{Size: info.Size(), Mtime: info.ModTime().Unix()}, upClient, cache)
 			if eerr != nil {
 				return eerr
@@ -1818,11 +1789,16 @@ var settingValidators = map[string]func(string) error{
 	"bw.limit_bytes":       intRange(0, 1<<40),
 	"bw.percent":           intRange(10, 95),
 	"bw.mode":              oneOf("off", "fixed", "percent"),
+	"bw.sched_on":          oneOf("0", "1"),            // slow down during set hours
+	"bw.sched_from":        intRange(0, 23),            // first hour of the window
+	"bw.sched_to":          intRange(0, 23),            // hour it ends (exclusive)
+	"bw.sched_limit_bytes": intRange(1, 1<<40),         // limit inside the window
 	// Default on. A version check sends no identifiers and no usage data, and
 	// the people it exists for — users stranded on 1.0.0 without the NTFS or
 	// data-safety fixes — are exactly the ones who would never find an
 	// off-by-default switch.
 	"updates.check": oneOf("0", "1"),
+	"updates.source": oneOf("fork", "upstream"),
 	// Unlisted keys are hard-rejected, so this line is mandatory for the
 	// setting to be writable at all.
 	"ui.close_action": oneOf("ask", "quit", "pill"),
@@ -1831,7 +1807,7 @@ var settingValidators = map[string]func(string) error{
 	"queue.start_paused": oneOf("0", "1"),
 	// "dark"/"light" are the pre-v3 names, still accepted so an existing
 	// setting keeps working; the frontend maps them to the new themes.
-	"ui.theme":         oneOf("clay", "cobalt", "iris", "system", "flightdeck", "drafting", "press", "nightshift", "dark", "light"),
+	"ui.theme":         oneOf("clay", "cobalt", "iris", "graphite", "system", "flightdeck", "drafting", "press", "nightshift", "dark", "light"),
 	"ui.local_default": anyString, // the folder local panes open in
 	// UI layout state lives here rather than in browser storage, so one
 	// backup of the database captures everything except credentials.
@@ -1839,6 +1815,12 @@ var settingValidators = map[string]func(string) error{
 	"ui.queue_sort":    jsonBlob,
 	"ui.pane_columns":  jsonBlob,
 	"ui.pane_sort":     jsonBlob,
+	"ui.tree_width":    jsonBlob,
+	"ui.pane_split":    intRange(20, 80), // left pane width, percent
+	"ui.pane_state":    jsonBlob,         // each pane's source and folder
+	"ui.pane_hidden":   jsonBlob,         // file-list columns the user hid
+	"ui.notify":        oneOf("0", "1"),  // desktop notification when the queue finishes
+	"ui.remote_side":   oneOf("0", "1"),   // the pane server connections open in
 	"ui.recents":       jsonBlob,
 	// One-time flags ("1" once shown) — e.g. the post-first-transfer
 	// support-the-project toast must never repeat.
@@ -1938,4 +1920,175 @@ func (a *App) SetSetting(key, value string) error {
 
 func (a *App) emitConnState(siteID int64, state string) {
 	a.sink.Emit("site:connstate", map[string]any{"siteId": siteID, "state": state})
+}
+
+// dialSite opens one connection with whichever protocol the site uses. prompt
+// is the TOFU callback for unknown host keys / certificates (nil denies them).
+func (a *App) dialSite(ctx context.Context, siteID int64, site queue.Site, password string, prompt func(algo, fingerprint string) bool) (*sftpfast.Client, error) {
+	opts := parseSiteOptions(site.OptionsJSON)
+	if site.Protocol == "ftps" {
+		return sftpfast.DialFTPS(ctx, sftpfast.FTPSConfig{
+			Host:     site.Host,
+			Port:     site.Port,
+			User:     site.Username,
+			Password: password,
+			Implicit: opts.Implicit,
+			Verify: func(der []byte) error {
+				return a.hostkeys.Verify(siteID, hostkeys.CertAlgo, hostkeys.CertFingerprint(der), prompt)
+			},
+		})
+	}
+	return sftpfast.Dial(ctx, sftpfast.Config{
+		Host:     site.Host,
+		Port:     site.Port,
+		User:     site.Username,
+		Password: password,
+		KeyPath:  opts.KeyPath,
+		UseAgent: opts.UseAgent,
+	}, a.hostkeys.Callback(siteID, prompt))
+}
+
+// dialAll opens a transfer's connections concurrently, starting one every
+// stagger. Dialling them one after another made a large transfer wait for
+// lanes × setup time before its first byte (an SSH or FTPS login is several
+// round trips each). The first connection is mandatory; refusals beyond it
+// just mean the server granted fewer, so run with what we have rather than
+// retrying into a penalty.
+func (a *App) dialAll(ctx context.Context, siteID int64, site queue.Site, password string, n int, stagger time.Duration) ([]*sftpfast.Client, error) {
+	conns := make([]*sftpfast.Client, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	var refused atomic.Bool
+	for i := range conns {
+		// Cancellation is checked BETWEEN dials only. Aborting a connection
+		// that is open but has not yet authenticated is exactly what
+		// OpenSSH's PerSourcePenalties (on by default since 9.8) punishes —
+		// enough of them and the server refuses this IP for minutes.
+		if i > 0 && stagger > 0 {
+			time.Sleep(stagger)
+		}
+		// A refusal means the server is at its cap: stop asking for more.
+		if ctx.Err() != nil || refused.Load() {
+			break
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Cap concurrent handshakes process-wide: the server's
+			// MaxStartups counter is global, and several transfers may be
+			// dialling at once.
+			dialGate <- struct{}{}
+			defer func() { <-dialGate }()
+			conns[i], errs[i] = a.dialSite(ctx, siteID, site, password, nil)
+			if errs[i] != nil {
+				refused.Store(true)
+			}
+		}()
+	}
+	wg.Wait()
+
+	clients := conns[:0]
+	for _, c := range conns {
+		if c != nil {
+			clients = append(clients, c)
+		}
+	}
+	if len(clients) == 0 {
+		if err := errors.Join(errs...); err != nil {
+			return nil, err
+		}
+		return nil, ctx.Err()
+	}
+	if len(clients) < n {
+		log.Printf("dispatch: site %d granted %d/%d connections: %v", siteID, len(clients), n, errors.Join(errs...))
+	}
+	return clients, nil
+}
+
+
+// moveRoot is the queue's marker for a move: the item to delete after it lands.
+func moveRoot(move bool, src string) string {
+	if move {
+		return src
+	}
+	return ""
+}
+
+// MoveRemote relocates entries on a server into destDir without transferring
+// anything. A name that already exists there stops the move.
+func (a *App) MoveRemote(siteID int64, paths []string, destDir, dir string) (int, error) {
+	client, err := a.session(siteID)
+	if err != nil {
+		return 0, err
+	}
+	moved := 0
+	for _, p := range paths {
+		clean := path.Clean(p)
+		target := path.Join(destDir, path.Base(clean))
+		if target == clean || strings.HasPrefix(target, clean+"/") {
+			err = fmt.Errorf("cannot move %q into itself", path.Base(clean))
+		} else {
+			err = client.MoveEntry(clean, target)
+		}
+		if err != nil {
+			a.evictIfDead(siteID, client, err)
+			break
+		}
+		moved++
+	}
+	a.emitFsChanged("remote", siteID, dir)
+	a.emitFsChanged("remote", siteID, destDir)
+	return moved, err
+}
+
+// siteOptions is what a site keeps in its options JSON.
+type siteOptions struct {
+	Implicit    bool   `json:"implicit"`    // FTPS: TLS from the first byte
+	KeyPath     string `json:"keyPath"`     // SFTP: private key file
+	UseAgent    bool   `json:"useAgent"`    // SFTP: log in through the SSH agent
+	AutoConnect bool   `json:"autoConnect"` // connect when warpseed starts
+}
+
+func parseSiteOptions(optionsJSON string) (o siteOptions) {
+	_ = json.Unmarshal([]byte(optionsJSON), &o)
+	return o
+}
+
+// PickFile opens the system file dialog and returns the chosen path, or "".
+func (a *App) PickFile(title string) (string, error) {
+	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{Title: title})
+}
+
+// sessionKey is the part of the options a live connection depends on;
+// toggling something else (auto-connect) must not drop an open session.
+func (o siteOptions) sessionKey() siteOptions {
+	o.AutoConnect = false
+	return o
+}
+
+// Notify raises a desktop notification. Failure to notify is never worth
+// surfacing: it is a courtesy, and the queue's own state is the record.
+func (a *App) Notify(title, body string) {
+	a.notifyOnce.Do(func() { a.notifyErr = wruntime.InitializeNotifications(a.ctx) })
+	if a.notifyErr != nil {
+		return
+	}
+	_ = wruntime.SendNotification(a.ctx, wruntime.NotificationOptions{
+		ID: "warpseed-queue", Title: title, Body: body,
+	})
+}
+
+// TransferHistory lists the most recent transfers cleared from the queue.
+func (a *App) TransferHistory() ([]queue.HistoryEntry, error) {
+	if a.store == nil {
+		return nil, errNoStore
+	}
+	return a.store.History(500)
+}
+
+// secondInstance runs when the user launches warpseed again: show the
+// existing window rather than leave them wondering where it went.
+func (a *App) secondInstance(options.SecondInstanceData) {
+	wruntime.WindowUnminimise(a.ctx)
+	wruntime.Show(a.ctx)
 }

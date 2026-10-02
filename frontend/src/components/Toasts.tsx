@@ -11,7 +11,8 @@ interface Toast {
 let nextId = 1;
 
 /** Bottom-right toasts (ux-spec §7.8): app errors + local notifications via
-    the ws:toast CustomEvent. Max 3 shown, auto-dismiss 5s. */
+    the ws:toast CustomEvent. Max 3 shown; click one to dismiss it. Auto-dismiss
+    after 5s, errors after 12s. */
 export default function Toasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -19,7 +20,8 @@ export default function Toasts() {
     const push = (kind: Toast["kind"], text: string) => {
       const t = { id: nextId++, kind, text };
       setToasts((ts) => [...ts.slice(-2), t]);
-      setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), 5000);
+      // Errors carry what the user must act on, so they linger.
+      setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), kind === "error" ? 12000 : 5000);
     };
     const offErr = on<string>("app:error", (msg) => push("error", msg));
     const offInfo = on<string>("app:info", (msg) => push("success", msg));
@@ -39,7 +41,13 @@ export default function Toasts() {
   return (
     <div className="toasts">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast toast--${t.kind}`} role="status">
+        <div
+          key={t.id}
+          className={`toast toast--${t.kind}`}
+          role={t.kind === "error" ? "alert" : "status"}
+          title="Click to dismiss"
+          onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}
+        >
           <span className="toast__icon">
             {t.kind === "error" ? (
               <Warning size={15} />

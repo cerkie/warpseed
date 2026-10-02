@@ -38,6 +38,10 @@ import {
   SetSiteRemotePath,
   MkdirLocal,
   MkdirRemote,
+  PickFile,
+  Notify,
+  MoveLocal,
+  MoveRemote,
   PauseTransfer,
   RemoteHome,
   RenameLocal,
@@ -51,6 +55,8 @@ import {
   SetSetting,
   QueuePaused,
   Sites,
+  TransferHistory,
+  UpdateRepo,
   TransfersList,
 } from "../wailsjs/go/main/App";
 import { BrowserOpenURL, EventsOn } from "../wailsjs/runtime/runtime";
@@ -241,12 +247,15 @@ export interface DownloadItem {
       it to tell an upgrade from a downgrade; without it every comparison
       falls through to "anything else". */
   modTime: string;
+  /** Delete the original once the copy has completed. */
+  move?: boolean;
 }
 
 export interface UploadItem {
   src: string;
   size: number;
   isDir: boolean;
+  move?: boolean;
 }
 
 export interface TransferProgress {
@@ -418,3 +427,33 @@ export const retryFailedTransfers = (): Promise<number> => RetryFailedTransfers(
     is open are not part of what they approved. */
 export const clearFailedTransfers = (ids: number[]): Promise<ClearResult> =>
   ClearFailedTransfers(ids) as unknown as Promise<ClearResult>;
+
+/** Move entries into another folder of the same filesystem (this PC, or one
+    server), without transferring anything. */
+export const moveEntries = (
+  source: PaneSource,
+  paths: string[],
+  destDir: string,
+  fromDir: string,
+): Promise<number> =>
+  source === "local" ? MoveLocal(paths, destDir, fromDir) : MoveRemote(source, paths, destDir, fromDir);
+
+/** The system file dialog; "" when the user cancels. */
+export const pickFile = (title: string): Promise<string> => PickFile(title);
+
+export const notify = (title: string, body: string): Promise<void> => Notify(title, body);
+
+export interface HistoryEntry {
+  siteName: string;
+  direction: string;
+  src: string;
+  dst: string;
+  size: number;
+  finishedAt: string;
+}
+
+export const transferHistory = (): Promise<HistoryEntry[]> =>
+  TransferHistory() as Promise<HistoryEntry[]>;
+
+/** The repository update checks currently go to, e.g. "owner/repo". */
+export const updateRepo = (): Promise<string> => UpdateRepo();

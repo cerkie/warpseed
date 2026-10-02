@@ -3,6 +3,16 @@
    queue:changed; progress overlaid from transfer:progress events). */
 import { create } from "zustand";
 import { transfersList, type PaneSource, type Site, type Transfer } from "./ipc";
+import { getPref, setPref } from "./lib/prefs";
+
+function readHiddenCols(): string[] {
+  try {
+    const v = JSON.parse(getPref("ui.pane_hidden") ?? "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
 import type { PromptSpec } from "./components/PromptDialog";
 
 interface ProgressSample {
@@ -56,6 +66,9 @@ interface UiState {
   /** Queue-wide pause, mirrored from the backend (queue:paused). */
   queuePaused: boolean;
   settingsOpen: boolean;
+  historyOpen: boolean;
+  /** File-list columns the user has hidden ("psize", "pdate"), shared by both panes. */
+  hiddenCols: string[];
   closeGuardOpen: boolean;
   viewMode: "browse" | "flight" | "deck" | "timeline";
   confirm: PromptSpec | null;
@@ -78,6 +91,8 @@ interface UiState {
   setQueueOpen: (open: boolean) => void;
   setQueuePaused: (on: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setHistoryOpen: (open: boolean) => void;
+  toggleColumn: (id: string) => void;
   setCloseGuardOpen: (open: boolean) => void;
   /** Raise a confirmation. Destructive actions go through this rather than
       calling their IPC directly; see askConfirm's note. */
@@ -108,6 +123,8 @@ export const useUiStore = create<UiState>((set) => ({
   queueOpen: false,
   queuePaused: false,
   settingsOpen: false,
+  historyOpen: false,
+  hiddenCols: readHiddenCols(),
   closeGuardOpen: false,
   confirm: null,
   viewMode: "browse",
@@ -177,6 +194,13 @@ export const useUiStore = create<UiState>((set) => ({
   setQueueOpen: (queueOpen) => set({ queueOpen }),
   setQueuePaused: (queuePaused) => set({ queuePaused }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setHistoryOpen: (historyOpen) => set({ historyOpen }),
+  toggleColumn: (id) =>
+    set((s) => {
+      const hiddenCols = s.hiddenCols.includes(id) ? s.hiddenCols.filter((c) => c !== id) : [...s.hiddenCols, id];
+      setPref("ui.pane_hidden", JSON.stringify(hiddenCols));
+      return { hiddenCols };
+    }),
   setCloseGuardOpen: (closeGuardOpen) => set({ closeGuardOpen }),
 
   // Every destructive action asks first, from one place, so the wording and

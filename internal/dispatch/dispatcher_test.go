@@ -1073,3 +1073,64 @@ func TestBulkCancelDialsOncePerSiteNotOncePerRow(t *testing.T) {
 		}
 	}
 }
+
+// A completed move deletes the original and prunes folders it emptied, but
+// only up to the moved folder and never one that still holds something.
+func TestRemoveMovedSourcePrunesOnlyEmptiedFolders(t *testing.T) {
+	d := &Dispatcher{sink: nopSink{}}
+	root := filepath.Join(t.TempDir(), "moved")
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a, b := filepath.Join(sub, "a.bin"), filepath.Join(root, "b.bin")
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parent := filepath.Dir(root)
+	keep := filepath.Join(parent, "keep.txt")
+	_ = os.WriteFile(keep, nil, 0o644)
+
+	d.removeMovedSource(queue.Transfer{Direction: "upload", Src: a, MoveRoot: root}, nil)
+	if _, err := os.Stat(a); err == nil {
+		t.Fatal("original not deleted")
+	}
+	if _, err := os.Stat(sub); err == nil {
+		t.Fatal("emptied subfolder not pruned")
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatal("folder still holding b.bin was removed")
+	}
+
+	d.removeMovedSource(queue.Transfer{Direction: "upload", Src: b, MoveRoot: root}, nil)
+	if _, err := os.Stat(root); err == nil {
+		t.Fatal("emptied moved folder not removed")
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatal("pruning went above the moved folder")
+	}
+
+	// A plain copy (no MoveRoot) never deletes anything.
+	d.removeMovedSource(queue.Transfer{Direction: "upload", Src: keep}, nil)
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatal("a non-move transfer deleted its source")
+	}
+}
+
+func TestInScheduleWindow(t *testing.T) {
+	cases := []struct {
+		hour, from, to int
+		want           bool
+	}{
+		{9, 9, 17, true}, {16, 9, 17, true}, {17, 9, 17, false}, {8, 9, 17, false},
+		{23, 22, 6, true}, {3, 22, 6, true}, {6, 22, 6, false}, {12, 22, 6, false},
+		{10, 10, 10, false},
+	}
+	for _, c := range cases {
+		if got := inScheduleWindow(c.hour, c.from, c.to); got != c.want {
+			t.Errorf("hour %d in [%d,%d) = %v, want %v", c.hour, c.from, c.to, got, c.want)
+		}
+	}
+}

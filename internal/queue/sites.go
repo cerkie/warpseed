@@ -104,11 +104,11 @@ func (s *Store) DeleteSite(id int64) error {
 	return tx.Commit()
 }
 
-// Sites lists all saved sites, most recently updated first.
+// Sites lists all saved sites, alphabetically.
 func (s *Store) Sites() ([]Site, error) {
 	rows, err := s.db.Query(
 		`SELECT id,name,protocol,host,port,username,cred_ref,options_json,remote_path,max_transfers,created_at,updated_at
-		 FROM sites ORDER BY updated_at DESC, id DESC`)
+		 FROM sites ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list sites: %w", err)
 	}

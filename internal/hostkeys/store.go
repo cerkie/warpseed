@@ -3,7 +3,9 @@
 package hostkeys
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -40,32 +42,45 @@ func New(db *sql.DB) *Store { return &Store{db: db} }
 // denies unknown keys outright.
 func (s *Store) Callback(siteID int64, prompt func(algo, fingerprint string) bool) ssh.HostKeyCallback {
 	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
-		algo := key.Type()
-		fp := ssh.FingerprintSHA256(key)
+		return s.Verify(siteID, key.Type(), ssh.FingerprintSHA256(key), prompt)
+	}
+}
 
-		var pinned string
-		err := s.db.QueryRow(
-			`SELECT sha256_fp FROM hostkeys WHERE site_id=? AND algo=?`, siteID, algo,
-		).Scan(&pinned)
+// CertAlgo is the algo label FTPS certificate pins are stored under.
+const CertAlgo = "tls-cert"
 
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			if prompt != nil && prompt(algo, fp) {
-				if _, ierr := s.db.Exec(
-					`INSERT INTO hostkeys(site_id, algo, sha256_fp, pinned_at) VALUES (?,?,?,?)`,
-					siteID, algo, fp, time.Now().UTC().Format(time.RFC3339),
-				); ierr != nil {
-					return fmt.Errorf("pin host key: %w", ierr)
-				}
-				return nil
+// CertFingerprint formats a DER certificate's SHA-256 the way SSH keys are
+// shown ("SHA256:<base64>"), so one table and one dialog serve both.
+func CertFingerprint(der []byte) string {
+	sum := sha256.Sum256(der)
+	return "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
+}
+
+// Verify checks one presented identity against the site's pin, pinning it via
+// prompt on first sight (TOFU) exactly as Callback does.
+func (s *Store) Verify(siteID int64, algo, fp string, prompt func(algo, fingerprint string) bool) error {
+	var pinned string
+	err := s.db.QueryRow(
+		`SELECT sha256_fp FROM hostkeys WHERE site_id=? AND algo=?`, siteID, algo,
+	).Scan(&pinned)
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if prompt != nil && prompt(algo, fp) {
+			if _, ierr := s.db.Exec(
+				`INSERT INTO hostkeys(site_id, algo, sha256_fp, pinned_at) VALUES (?,?,?,?)`,
+				siteID, algo, fp, time.Now().UTC().Format(time.RFC3339),
+			); ierr != nil {
+				return fmt.Errorf("pin host key: %w", ierr)
 			}
-			return ErrRejected
-		case err != nil:
-			return fmt.Errorf("host key lookup: %w", err)
-		case pinned == fp:
 			return nil
-		default:
-			return &KeyChangedError{Algo: algo, Pinned: pinned, Presented: fp}
 		}
+		return ErrRejected
+	case err != nil:
+		return fmt.Errorf("host key lookup: %w", err)
+	case pinned == fp:
+		return nil
+	default:
+		return &KeyChangedError{Algo: algo, Pinned: pinned, Presented: fp}
 	}
 }

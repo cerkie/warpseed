@@ -92,7 +92,7 @@ func verifyResumableLocalPart(ctx context.Context, c *Client, remotePath, part s
 	}
 	defer lf.Close()
 
-	rf, err := c.sftp.Open(remotePath)
+	rf, err := c.openReaderAt(remotePath)
 	if err != nil {
 		if isNotExistRemote(err) {
 			return ErrChunkStateLost
@@ -295,7 +295,7 @@ func DownloadChunks(
 			}
 			defer lf.Close()
 
-			rf, err := c.sftp.Open(remotePath)
+			rf, err := c.openReaderAt(remotePath)
 			if err != nil {
 				fail(fmt.Errorf("open remote %q: %w", remotePath, err))
 				return
@@ -488,7 +488,7 @@ func (c *Client) StatRemote(remotePath string) (size int64, modTimeUnix int64, e
 // 3 GB upload "newer and larger" and send the lot before the server refused
 // to be overwritten.
 func (c *Client) StatRemoteEntry(remotePath string) (size, modTimeUnix int64, isDir bool, err error) {
-	st, err := c.sftp.Stat(remotePath)
+	st, err := c.stat(remotePath)
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("stat remote %q: %w", remotePath, err)
 	}

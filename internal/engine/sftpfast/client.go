@@ -5,15 +5,20 @@ package sftpfast
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 
 	"warpseed/internal/engine/core"
 )
@@ -23,7 +28,10 @@ type Config struct {
 	Host     string
 	Port     int
 	User     string
-	Password string // agent/key auth arrives with the Windows agent bridge
+	Password string // the login password, or the key file's passphrase
+	// KeyPath is a private key file to log in with; UseAgent uses the SSH agent.
+	KeyPath  string
+	UseAgent bool
 	// Concurrency is outstanding requests per file (research: 64 default,
 	// up to 256 saturates 1 Gbps at high RTT).
 	Concurrency int
@@ -59,6 +67,7 @@ var preferredCiphers = []string{
 type Client struct {
 	ssh  *ssh.Client // nil for in-process test clients
 	sftp *sftp.Client
+	ftp  *ftpConn // set instead of ssh/sftp for FTPS sites
 }
 
 // Dial connects, authenticates, and opens an SFTP session. hostKey is
@@ -67,9 +76,15 @@ func Dial(ctx context.Context, cfg Config, hostKey ssh.HostKeyCallback) (*Client
 	cfg = cfg.withDefaults()
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprint(cfg.Port))
 
+	auth, closeAgent, err := cfg.authMethods()
+	if err != nil {
+		return nil, err
+	}
+	defer closeAgent() // only needed while logging in
+
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
-		Auth:            []ssh.AuthMethod{ssh.Password(cfg.Password)},
+		Auth:            auth,
 		HostKeyCallback: hostKey,
 		Timeout:         cfg.Timeout,
 		Config:          ssh.Config{Ciphers: preferredCiphers},
@@ -104,6 +119,9 @@ func Dial(ctx context.Context, cfg Config, hostKey ssh.HostKeyCallback) (*Client
 // requests on it block until the OS gives up (minutes), which is exactly the
 // window in which "reconnect" must already work — hence the hard deadline.
 func (c *Client) Alive(timeout time.Duration) bool {
+	if c.ftp != nil {
+		return c.ftp.alive(timeout)
+	}
 	done := make(chan error, 1)
 	go func() {
 		if c.ssh == nil { // in-process test client: probe the SFTP session itself
@@ -125,6 +143,9 @@ func (c *Client) Alive(timeout time.Duration) bool {
 }
 
 func (c *Client) Close() error {
+	if c.ftp != nil {
+		return c.ftp.close()
+	}
 	var first error
 	if c.sftp != nil {
 		first = c.sftp.Close()
@@ -140,6 +161,9 @@ func (c *Client) Close() error {
 // List reads a remote directory, sorted dirs-first then case-insensitive —
 // identical presentation contract to localfs.List.
 func (c *Client) List(remotePath string) (core.Listing, error) {
+	if c.ftp != nil {
+		return c.ftp.list(remotePath)
+	}
 	clean := path.Clean(remotePath)
 	if clean == "" || clean == "." {
 		clean = "/"
@@ -163,23 +187,15 @@ func (c *Client) List(remotePath string) (core.Listing, error) {
 		}
 		entries = append(entries, e)
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir != entries[j].IsDir {
-			return entries[i].IsDir
-		}
-		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
-	})
-
-	parent := path.Dir(clean)
-	if parent == clean {
-		parent = ""
-	}
-	return core.Listing{Path: clean, Parent: parent, Entries: entries}, nil
+	return newListing(clean, entries), nil
 }
 
 // Home resolves the session's initial directory (the SFTP server's idea of
 // "."), so remote panes open where the user lands, not at "/".
 func (c *Client) Home() (string, error) {
+	if c.ftp != nil {
+		return c.ftp.home()
+	}
 	home, err := c.sftp.RealPath(".")
 	if err != nil {
 		return "", fmt.Errorf("resolve remote home: %w", err)
@@ -204,4 +220,72 @@ func newFromSFTP(sc *sftp.Client) *Client {
 // half of that decision had never executed. Production code calls Dial.
 func NewFromSFTP(sc *sftp.Client) *Client {
 	return newFromSFTP(sc)
+}
+
+// stat is Stat for whichever protocol the client speaks.
+func (c *Client) stat(p string) (os.FileInfo, error) {
+	if c.ftp != nil {
+		return c.ftp.stat(p)
+	}
+	return c.sftp.Stat(p)
+}
+
+// newListing sorts entries dirs-first then case-insensitive and fills in the
+// parent, so every protocol presents a directory the same way.
+func newListing(clean string, entries []core.Entry) core.Listing {
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+	})
+	parent := path.Dir(clean)
+	if parent == clean {
+		parent = ""
+	}
+	return core.Listing{Path: clean, Parent: parent, Entries: entries}
+}
+
+// openReaderAt opens a remote file for ranged reads over either protocol.
+func (c *Client) openReaderAt(remotePath string) (interface {
+	io.ReaderAt
+	io.Closer
+}, error) {
+	if c.ftp != nil {
+		return &ftpReader{f: c.ftp, path: remotePath}, nil
+	}
+	return c.sftp.Open(remotePath)
+}
+
+// authMethods builds the login methods a config asks for: a key file (the
+// password field then holds its passphrase), the SSH agent, or a password.
+func (c Config) authMethods() (methods []ssh.AuthMethod, closeAgent func(), err error) {
+	closeAgent = func() {}
+	if c.KeyPath != "" {
+		pem, rerr := os.ReadFile(c.KeyPath)
+		if rerr != nil {
+			return nil, closeAgent, fmt.Errorf("read key file: %w", rerr)
+		}
+		signer, perr := ssh.ParsePrivateKey(pem)
+		var missing *ssh.PassphraseMissingError
+		if errors.As(perr, &missing) {
+			signer, perr = ssh.ParsePrivateKeyWithPassphrase(pem, []byte(c.Password))
+		}
+		if perr != nil {
+			return nil, closeAgent, fmt.Errorf("unable to authenticate: key %s: %w", filepath.Base(c.KeyPath), perr)
+		}
+		methods = append(methods, ssh.PublicKeys(signer))
+	}
+	if c.UseAgent {
+		conn, derr := dialAgent()
+		if derr != nil {
+			return nil, closeAgent, fmt.Errorf("unable to authenticate: SSH agent: %w", derr)
+		}
+		closeAgent = func() { conn.Close() }
+		methods = append(methods, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
+	}
+	if len(methods) == 0 {
+		methods = append(methods, ssh.Password(c.Password))
+	}
+	return methods, closeAgent, nil
 }

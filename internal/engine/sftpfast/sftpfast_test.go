@@ -219,7 +219,7 @@ func TestUploadFull(t *testing.T) {
 
 	var got int64
 	// Act
-	if err := c.Upload(context.Background(), src, dst, nil, func(d int64) { got += d }); err != nil {
+	if err := c.Upload(context.Background(), src, filepath.ToSlash(dst), nil, func(d int64) { got += d }); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
 
@@ -363,5 +363,39 @@ func TestWalkFilesEnumeratesTree(t *testing.T) {
 	}
 	if len(paths) != 3 || total != 60 {
 		t.Fatalf("walk found %d files totalling %d, want 3 / 60: %v", len(paths), total, paths)
+	}
+}
+
+// A part of the right length but the wrong bytes must restart, in both
+// directions, instead of being completed into a corrupt file.
+func TestResumeRejectsMismatchedPart(t *testing.T) {
+	c := newTestClient(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.bin")
+	data := writeRandomFile(t, src, 300<<10)
+	bogus := make([]byte, len(data)/2)
+
+	dst := filepath.ToSlash(filepath.Join(dir, "up.bin"))
+	if err := os.WriteFile(dst+PartSuffix, bogus, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var start int64 = -1
+	if err := c.Upload(context.Background(), src, dst, func(o int64) { start = o }, nil); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if start != 0 || !bytes.Equal(mustRead(t, dst), data) {
+		t.Fatalf("upload resumed a mismatched part (start=%d)", start)
+	}
+
+	out := filepath.Join(dir, "down.bin")
+	if err := os.WriteFile(out+PartSuffix, bogus, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start = -1
+	if err := c.Download(context.Background(), filepath.ToSlash(src), out, func(o int64) { start = o }, nil); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if start != 0 || !bytes.Equal(mustRead(t, out), data) {
+		t.Fatalf("download resumed a mismatched part (start=%d)", start)
 	}
 }

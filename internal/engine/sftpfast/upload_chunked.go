@@ -53,6 +53,9 @@ func isNotExistRemote(err error) bool {
 // RemoveRemote deletes one remote file, ignoring absence. Deliberately NOT
 // Client.Remove, which recurses into directories.
 func (c *Client) RemoveRemote(remotePath string) error {
+	if c.ftp != nil {
+		return c.ftp.removeRemote(remotePath)
+	}
 	if err := c.sftp.Remove(remotePath); err != nil && !isNotExistRemote(err) {
 		return fmt.Errorf("remove remote %q: %w", remotePath, err)
 	}
@@ -62,7 +65,7 @@ func (c *Client) RemoveRemote(remotePath string) error {
 // StatRemoteSize reports a remote file's size, distinguishing absent from
 // error so a resume guard can tell them apart.
 func (c *Client) StatRemoteSize(remotePath string) (size int64, exists bool, err error) {
-	st, err := c.sftp.Stat(remotePath)
+	st, err := c.stat(remotePath)
 	if err != nil {
 		if isNotExistRemote(err) {
 			return 0, false, nil
@@ -91,6 +94,9 @@ func UploadChunks(
 ) error {
 	if len(clients) == 0 {
 		return errors.New("no connections for chunked upload")
+	}
+	if clients[0].ftp != nil {
+		return errFTPSChunked
 	}
 	if progress == nil {
 		progress = func(int, int64) {}

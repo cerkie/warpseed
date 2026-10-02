@@ -221,7 +221,7 @@ export const DATA_INFO = {
 };
 
 export const SETTINGS: Record<string, string> = {
-  "ui.theme": "clay",
+  "ui.theme": "graphite",
   "ui.local_default": LOCAL_HOME,
   "ui.donate_nudged": "1",
   "transfers.global_max": "8",

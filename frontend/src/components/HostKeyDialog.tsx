@@ -30,7 +30,7 @@ export default function HostKeyDialog() {
           First connection to {current.host}
         </h2>
         <p>
-          The server presented a <b>{current.algo}</b> key warpseed hasn’t seen before. Verify
+          The server presented a <b>{current.algo === "tls-cert" ? "TLS certificate" : `${current.algo} key`}</b> warpseed hasn’t seen before. Verify
           this fingerprint against one your provider published, then trust it to pin it for
           this site.
         </p>

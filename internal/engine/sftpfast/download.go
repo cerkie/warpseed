@@ -1,6 +1,7 @@
 package sftpfast
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,6 +28,9 @@ func (c *Client) Download(ctx context.Context, remotePath, localPath string, onS
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("download cancelled: %w", err)
+	}
+	if c.ftp != nil {
+		return c.ftp.download(ctx, remotePath, localPath, onStart, progress)
 	}
 
 	rf, err := c.sftp.Open(remotePath)
@@ -57,11 +61,19 @@ func (c *Client) Download(ctx context.Context, remotePath, localPath string, onS
 	if st, err := lf.Stat(); err == nil {
 		offset = st.Size()
 	}
+	// A part we cannot prove is the start of this file restarts: a longer
+	// part means the remote changed, and equal length proves nothing.
 	if offset > remoteSize {
 		offset = 0
-		if err := lf.Truncate(0); err != nil {
-			return fmt.Errorf("truncate stale part: %w", err)
+	} else if offset > 0 {
+		if ok, err := tailMatches(rf, lf, offset); err != nil {
+			return fmt.Errorf("verify resume of %q: %w", remotePath, err)
+		} else if !ok {
+			offset = 0
 		}
+	}
+	if err := lf.Truncate(offset); err != nil {
+		return fmt.Errorf("truncate stale part: %w", err)
 	}
 	onStart(offset)
 
@@ -128,4 +140,34 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 		p.onWrite(int64(n))
 	}
 	return n, err
+}
+
+// tailMatches reports whether the last bytes before offset are identical in
+// a and b, so a resume never trusts a partial file on its size alone.
+func tailMatches(a, b io.ReaderAt, offset int64) (bool, error) {
+	n := min(offset, tailVerifyBytes)
+	x, y := make([]byte, n), make([]byte, n)
+	for _, p := range []struct {
+		r   io.ReaderAt
+		buf []byte
+	}{{a, x}, {b, y}} {
+		got, err := p.r.ReadAt(p.buf, offset-n)
+		if int64(got) < n {
+			if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return false, nil // shorter than claimed: not the same file
+			}
+			return false, err
+		}
+	}
+	return bytes.Equal(x, y), nil
+}
+
+// remoteTailMatches compares the tail of a remote part with the local source.
+func (c *Client) remoteTailMatches(part string, lf io.ReaderAt, offset int64) (bool, error) {
+	rr, err := c.sftp.Open(part)
+	if err != nil {
+		return false, err
+	}
+	defer rr.Close()
+	return tailMatches(rr, lf, offset)
 }

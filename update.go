@@ -29,9 +29,11 @@ import (
  */
 
 const (
-	// releases/latest excludes drafts and prereleases by definition, so
-	// nothing needs filtering on our side.
-	latestReleaseURL = "https://api.github.com/repos/ZyraLabs/warpseed/releases/latest"
+	// The two places a release can be announced from. A build of the fork
+	// must default to the fork: pointing it at the original would offer its
+	// users a download that lacks the fork's changes.
+	upstreamRepo = "ZyraLabs/warpseed"
+	forkRepo     = "cerkie/warpseed"
 
 	// Deliberately carries no version. GitHub does not show us its logs, so a
 	// version here would buy warpseed nothing and reveal strictly more.
@@ -52,6 +54,7 @@ const (
 // bookkeeping the Go side writes directly.
 const (
 	setUpdateCheck     = "updates.check"
+	setUpdateSource    = "updates.source" // fork | upstream
 	setUpdateDismissed = "updates.dismissed"
 	setUpdateLastCheck = "updates.last_check"
 )
@@ -142,7 +145,7 @@ func (a *App) fetchLatestRelease(parent context.Context) (version, url string, e
 	ctx, cancel := context.WithTimeout(parent, updateCheckTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+a.updateRepo()+"/releases/latest", nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -161,6 +164,9 @@ func (a *App) fetchLatestRelease(parent context.Context) (version, url string, e
 		// 403/429 here is the shared unauthenticated rate limit, keyed on the
 		// source IP and exhaustible by anything else on the same network.
 		// Ordinary failure, no retry.
+		if resp.StatusCode == http.StatusNotFound {
+			return "", "", fmt.Errorf("no releases published at %s yet", a.updateRepo())
+		}
 		return "", "", fmt.Errorf("github returned %s", resp.Status)
 	}
 
@@ -229,3 +235,15 @@ func parseVersion(v string) ([]int, bool) {
 }
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// updateRepo is the repository releases are checked against: the fork unless
+// the user chose the original.
+func (a *App) updateRepo() string {
+	if a.store != nil && a.store.Setting(setUpdateSource, "fork") == "upstream" {
+		return upstreamRepo
+	}
+	return forkRepo
+}
+
+// UpdateRepo tells the settings dialog which repository a check will use.
+func (a *App) UpdateRepo() string { return a.updateRepo() }

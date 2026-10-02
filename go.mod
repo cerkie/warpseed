@@ -3,8 +3,12 @@ module warpseed
 go 1.25.0
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/danieljoos/wincred v1.2.3
+	github.com/fclairamb/ftpserverlib v0.32.4
+	github.com/jlaffaye/ftp v0.2.4
 	github.com/pkg/sftp v1.13.11
+	github.com/spf13/afero v1.15.0
 	github.com/wailsapp/wails/v2 v2.13.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
@@ -47,4 +51,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-

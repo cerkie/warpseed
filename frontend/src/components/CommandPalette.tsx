@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { connectAndHome, disconnectSite, getSettings, localStart } from "../ipc";
+import { remoteSide } from "../lib/prefs";
 import { useUiStore } from "../store";
 import type { PaneCmd } from "./FilePane";
 import { queueCmd } from "./QueueDock";
@@ -77,7 +78,8 @@ export default function CommandPalette() {
           setPane(active, "local", await localStart(cfg["ui.local_default"]));
         }),
       },
-      { label: "New connection…", icon: <ChevronRight size={15} />, run: close(() => setQuickConnect(true, active)) },
+      { label: "New connection…", icon: <ChevronRight size={15} />, run: close(() => setQuickConnect(true, remoteSide())) },
+      { label: "Transfer history", icon: <Check size={15} />, run: close(() => useUiStore.getState().setHistoryOpen(true)) },
       {
         label: "Settings",
         icon: <Sliders size={15} />,

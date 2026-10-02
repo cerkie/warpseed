@@ -546,3 +546,73 @@
   outline: 1px dashed var(--accent);
   outline-offset: -1px;
 }
+
+/* The note that follows the pointer during a drag, saying what a drop does. */
+.drag-hint {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-4);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: var(--text-xs);
+  box-shadow: var(--shadow-1);
+  white-space: nowrap;
+}
+
+/* Hidden file-list columns: drop the cells and their track. */
+.pane__list[data-hide~="psize"] .col-psize,
+.pane__list[data-hide~="pdate"] .col-pdate {
+  display: none;
+}
+.pane__list[data-hide~="psize"] .row {
+  grid-template-columns: minmax(var(--col-pname, 200px), 1fr) var(--col-pdate, 112px);
+}
+.pane__list[data-hide~="pdate"] .row {
+  grid-template-columns: minmax(var(--col-pname, 200px), 1fr) var(--col-psize, 84px);
+}
+.pane__list[data-hide~="psize"][data-hide~="pdate"] .row {
+  grid-template-columns: minmax(var(--col-pname, 200px), 1fr);
+}
+
+/* A chevron on the source pill says it opens a list. It sits over the
+   select's right padding and lets clicks through to it. */
+.pane__srcpill {
+  position: relative;
+}
+.pane__srcpill::after {
+  content: "";
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  background: currentColor;
+  opacity: 0.75;
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.pane__source {
+  padding-right: 22px;
+}
+.pane__filter-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.pane__filter-close:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}

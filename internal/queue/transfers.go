@@ -37,20 +37,22 @@ type Transfer struct {
 	// the user resolves it, so the decision happens before any bytes move.
 	// JSON; see conflict.go.
 	Conflict *string `json:"conflict"`
+	// MoveRoot is set for a move: the source is deleted once this completes.
+	MoveRoot string `json:"moveRoot"`
 }
 
 var ErrTransferNotFound = errors.New("transfer not found")
 
 const transferCols = `id,site_id,engine,direction,src,dst,size,state,priority,
 	bytes_done,attempt,next_retry_at,error,src_mtime,created_at,updated_at,
-	started_at,start_bytes,conflict`
+	started_at,start_bytes,conflict,move_root`
 
 func scanTransfer(row interface{ Scan(...any) error }) (Transfer, error) {
 	var t Transfer
 	err := row.Scan(&t.ID, &t.SiteID, &t.Engine, &t.Direction, &t.Src, &t.Dst,
 		&t.Size, &t.State, &t.Priority, &t.BytesDone, &t.Attempt,
 		&t.NextRetryAt, &t.Error, &t.SrcMtime, &t.CreatedAt, &t.UpdatedAt,
-		&t.StartedAt, &t.StartBytes, &t.Conflict)
+		&t.StartedAt, &t.StartBytes, &t.Conflict, &t.MoveRoot)
 	return t, err
 }
 
@@ -116,9 +118,9 @@ func (s *Store) EnqueueTransfer(t Transfer) (int64, error) {
 	}
 	now := nowUTC()
 	res, err := s.db.Exec(
-		`INSERT INTO transfers(site_id,engine,direction,src,dst,size,state,priority,created_at,updated_at)
-		 VALUES (?,?,?,?,?,?,'pending',?,?,?)`,
-		t.SiteID, t.Engine, t.Direction, t.Src, t.Dst, t.Size, t.Priority, now, now)
+		`INSERT INTO transfers(site_id,engine,direction,src,dst,size,state,priority,created_at,updated_at,move_root)
+		 VALUES (?,?,?,?,?,?,'pending',?,?,?,?)`,
+		t.SiteID, t.Engine, t.Direction, t.Src, t.Dst, t.Size, t.Priority, now, now, t.MoveRoot)
 	if err != nil {
 		return 0, fmt.Errorf("enqueue transfer: %w", err)
 	}
@@ -455,16 +457,6 @@ func (s *Store) OtherLiveTransfersForDst(going []int64, dst string) (int, error)
 	return n, nil
 }
 
-// ClearCompleted removes completed rows. A completed transfer renamed its
-// placeholder away on success, so there is nothing on disk to account for
-// and no reason to name them individually.
-func (s *Store) ClearCompleted() (int64, error) {
-	res, err := s.db.Exec(`DELETE FROM transfers WHERE state='completed'`)
-	if err != nil {
-		return 0, fmt.Errorf("clear completed: %w", err)
-	}
-	return res.RowsAffected()
-}
 
 // ClearCancelledByID removes the named cancelled rows. Cancelled rows can
 // still have a placeholder on disk or on a server, so the caller names only
@@ -711,4 +703,63 @@ func (s *Store) RequeueExcept(running []int64) (int64, error) {
 		return 0, fmt.Errorf("requeue orphans: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+// ClearCompleted removes completed rows, recording them in the history first.
+// A completed transfer renamed its placeholder away on success, so there is
+// nothing on disk to account for and no reason to name them individually.
+func (s *Store) ClearCompleted() (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("clear completed: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		`INSERT INTO history(site_name,direction,src,dst,size,finished_at)
+		 SELECT COALESCE((SELECT name FROM sites WHERE sites.id=transfers.site_id),''),
+		        direction,src,dst,size,updated_at
+		 FROM transfers WHERE state='completed'`); err != nil {
+		return 0, fmt.Errorf("record history: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM transfers WHERE state='completed'`)
+	if err != nil {
+		return 0, fmt.Errorf("clear completed: %w", err)
+	}
+	// Keep the history bounded; it is a convenience, not an archive.
+	if _, err := tx.Exec(`DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 2000)`); err != nil {
+		return 0, fmt.Errorf("trim history: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("clear completed: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// HistoryEntry is one finished transfer that has since been cleared.
+type HistoryEntry struct {
+	SiteName   string `json:"siteName"`
+	Direction  string `json:"direction"`
+	Src        string `json:"src"`
+	Dst        string `json:"dst"`
+	Size       int64  `json:"size"`
+	FinishedAt string `json:"finishedAt"`
+}
+
+// History returns the most recent cleared transfers, newest first.
+func (s *Store) History(limit int) ([]HistoryEntry, error) {
+	rows, err := s.db.Query(
+		`SELECT site_name,direction,src,dst,size,finished_at FROM history ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list history: %w", err)
+	}
+	defer rows.Close()
+	out := make([]HistoryEntry, 0, limit)
+	for rows.Next() {
+		var h HistoryEntry
+		if err := rows.Scan(&h.SiteName, &h.Direction, &h.Src, &h.Dst, &h.Size, &h.FinishedAt); err != nil {
+			return nil, fmt.Errorf("scan history: %w", err)
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }

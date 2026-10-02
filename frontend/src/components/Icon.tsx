@@ -179,3 +179,10 @@ export const Expand = icon(
     <path d="M6.5 14.5h-5v-5" />
   </>,
 );
+
+export const Pencil = icon(
+  <>
+    <path d="m10.5 3.5 2 2" />
+    <path d="M3.25 12.75 3.75 9.75 10.5 3l2.5 2.5-6.75 6.75z" />
+  </>,
+);

@@ -1,4 +1,4 @@
-import { useEffect, useState} from "react";
+import { useEffect, useRef, useState } from "react";
 import CommandPalette from "./components/CommandPalette";
 import FilePane from "./components/FilePane";
 import DeckView from "./components/DeckView";
@@ -10,6 +10,7 @@ import CloseGuardDialog from "./components/CloseGuardDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
 import UpdateBanner from "./components/UpdateBanner";
 import HostKeyDialog from "./components/HostKeyDialog";
+import HistoryDialog from "./components/HistoryDialog";
 import { Heart, Search, Shrink, Sliders, Slipstream } from "./components/Icon";
 import QueueDock from "./components/QueueDock";
 import QuickConnect from "./components/QuickConnect";
@@ -18,8 +19,13 @@ import Sparkline from "./components/Sparkline";
 import Toasts from "./components/Toasts";
 import { COMPANY, DONATE_URL } from "./lib/branding";
 import { applyTheme, type ThemePref } from "./lib/theme";
+import { getPref, onPrefsHydrated, remoteSide, setPref } from "./lib/prefs";
+import { formOf } from "./lib/protocol";
 import {
+  connectAndHome,
+  list,
   localStart,
+  notify,
   on,
   openExternal,
   setMiniMode as ipcSetMiniMode,
@@ -27,11 +33,23 @@ import {
   setSetting,
   sites as fetchSites,
   type ConnState,
+  type PaneSource,
   type TransferState,
   type FsChanged,
 } from "./ipc";
 import { useUiStore } from "./store";
 import "./App.css";
+
+// Set once the saved panes are back, so the defaults never get written over them.
+let savePanes = false;
+
+const SPLIT_MIN = 20;
+const SPLIT_MAX = 80;
+const clampSplit = (v: number) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v));
+const readSplit = () => {
+  const saved = Number(getPref("ui.pane_split"));
+  return saved >= SPLIT_MIN && saved <= SPLIT_MAX ? saved : 50;
+};
 
 export default function App() {
   const setPane = useUiStore((s) => s.setPane);
@@ -52,6 +70,56 @@ export default function App() {
   // The banner owns whether it is showing; App only needs to know so the grid
   // gains its row.
   const [updateShown, setUpdateShown] = useState(false);
+  // Left pane width as a percentage of the browse area; persisted on release.
+  const [split, setSplit] = useState(readSplit);
+  useEffect(() => onPrefsHydrated(() => setSplit(readSplit())), []);
+  const panesRef = useRef<HTMLDivElement>(null);
+
+  // A desktop notification when the queue runs dry while the window is not in
+  // front, so a long run can be left alone.
+  useEffect(() => {
+    const seen = new Map<number, string>();
+    let busy = false;
+    let finished = 0;
+    let failed = 0;
+    return useUiStore.subscribe((s) => {
+      for (const t of s.transfers) {
+        const prev = seen.get(t.id);
+        if (prev === t.state) continue;
+        seen.set(t.id, t.state);
+        if (prev && t.state === "completed") finished++;
+        if (prev && t.state === "failed") failed++;
+      }
+      const active = s.transfers.some((t) => ["pending", "dispatched", "active"].includes(t.state));
+      if (active) {
+        busy = true;
+      } else if (busy) {
+        busy = false;
+        if (finished + failed > 0 && !document.hasFocus() && getPref("ui.notify") !== "0") {
+          const text = failed > 0 ? `${finished} finished, ${failed} failed` : `${finished} finished`;
+          void notify("warpseed — queue finished", text);
+        }
+        finished = failed = 0;
+      }
+    });
+  }, []);
+
+  // Remember which folder each pane was showing, once the saved ones have
+  // been restored (saving earlier would overwrite them with the defaults).
+  useEffect(() => {
+    let timer: number | undefined;
+    const off = useUiStore.subscribe((s, prev) => {
+      if (!savePanes || s.panes === prev.panes) return;
+      const remote = s.panes.findIndex((p) => typeof p.source === "number");
+      if (remote >= 0 && String(remote) !== getPref("ui.remote_side")) setPref("ui.remote_side", String(remote));
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setPref("ui.pane_state", JSON.stringify(s.panes)), 400);
+    });
+    return () => {
+      off();
+      window.clearTimeout(timer);
+    };
+  }, []);
   const setMiniMode = useUiStore((s) => s.setMiniMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
 
@@ -124,10 +192,39 @@ export default function App() {
           maybeNudge();
 
           const start = await localStart(cfg["ui.local_default"]);
-          setPane(0, "local", start);
-          setPane(1, "local", start);
+          const saved = readSavedPanes();
+          for (const side of [0, 1] as const) {
+            const prev = saved[side];
+            const folder =
+              prev?.source === "local" && (await list("local", prev.path).then(() => true, () => false))
+                ? prev.path
+                : start;
+            setPane(side, "local", folder);
+            // A remote pane reconnects in the background; the local folder
+            // above stands in until (and unless) it does.
+            if (typeof prev?.source === "number") void restoreRemote(side, prev.source, prev.path, folder);
+          }
+          savePanes = true;
+          // Sites marked "connect on launch" come up in the background; a
+          // failure is not worth interrupting startup for. With no remote
+          // pane to restore, the first one takes the pane remotes live in.
+          const hadRemote = saved.some((p) => typeof p?.source === "number");
+          void fetchSites().then((all) =>
+            all.filter((s) => formOf(s).autoConnect).forEach(
+              (s, i) =>
+                void connectAndHome(s.id)
+                  .then((home) => {
+                    const side = remoteSide();
+                    if (i === 0 && !hadRemote && useUiStore.getState().panes[side].source === "local") {
+                      setPane(side, s.id, home);
+                    }
+                  })
+                  .catch(() => undefined),
+            ),
+          );
         })
         .catch(async () => {
+          savePanes = true;
           const home = await localStart();
           setPane(0, "local", home);
           setPane(1, "local", home);
@@ -230,6 +327,7 @@ export default function App() {
   }, [flightAvailable, setViewMode]);
 
   const connectedCount = Object.values(connStates).filter((s) => s === "connected").length;
+  const connecting = siteList.filter((s) => connStates[s.id] === "connecting");
 
   return (
     <div
@@ -290,7 +388,7 @@ export default function App() {
           <span className="omnibar__hint">Search files, sites — or type a command…</span>
           <span className="kbd">Ctrl K</span>
         </button>
-        <button className="btn btn--primary" onClick={() => setQuickConnect(true, activePane)}>
+        <button className="btn btn--primary" onClick={() => setQuickConnect(true, remoteSide())}>
           Connect
         </button>
         <button
@@ -324,10 +422,59 @@ export default function App() {
       </header>
 
       <main className="app__main">
+        {connecting.length > 0 && <div className="app__connecting" role="progressbar" aria-label="Connecting" />}
         {/* Panes stay mounted (display:none) in flight mode so pane state,
             scroll position and virtualizer measurements survive the trip. */}
-        <div className="app__panes" hidden={viewMode !== "browse"}>
+        <div
+          className="app__panes"
+          ref={panesRef}
+          hidden={viewMode !== "browse"}
+          style={{ gridTemplateColumns: `minmax(0, ${split}fr) 8px minmax(0, ${100 - split}fr)` }}
+        >
           <FilePane side={0} />
+          <div
+            className="app__splitter"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize panes"
+            aria-valuenow={Math.round(split)}
+            aria-valuemin={SPLIT_MIN}
+            aria-valuemax={SPLIT_MAX}
+            tabIndex={0}
+            title="Drag to resize, double-click to reset"
+            onPointerDown={(e) => {
+              const box = panesRef.current?.getBoundingClientRect();
+              if (!box || box.width <= 0) return;
+              e.preventDefault();
+              const el = e.currentTarget;
+              el.setPointerCapture(e.pointerId);
+              let last = split;
+              const move = (ev: PointerEvent) => {
+                last = clampSplit(((ev.clientX - box.left) / box.width) * 100);
+                setSplit(last);
+              };
+              const up = () => {
+                el.removeEventListener("pointermove", move);
+                el.removeEventListener("pointerup", up);
+                el.removeEventListener("pointercancel", up);
+                setPref("ui.pane_split", String(Math.round(last)));
+              };
+              el.addEventListener("pointermove", move);
+              el.addEventListener("pointerup", up);
+              el.addEventListener("pointercancel", up);
+            }}
+            onDoubleClick={() => {
+              setSplit(50);
+              setPref("ui.pane_split", "50");
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+              e.preventDefault();
+              const next = clampSplit(split + (e.key === "ArrowLeft" ? -2 : 2));
+              setSplit(next);
+              setPref("ui.pane_split", String(next));
+            }}
+          />
           <FilePane side={1} />
         </div>
         {viewMode === "flight" && <FlightView />}
@@ -339,7 +486,12 @@ export default function App() {
 
       <footer className="app__statusbar">
         <span className="statusbar__conn">
-          {connectedCount > 0 ? (
+          {connecting.length > 0 ? (
+            <>
+              <span className="conn-dot conn-dot--connecting" />
+              Connecting to {connecting.map((c) => c.name).join(", ")}…
+            </>
+          ) : connectedCount > 0 ? (
             <>
               <span className="conn-dot conn-dot--connected" />
               {connectedCount} site{connectedCount > 1 ? "s" : ""} connected
@@ -369,10 +521,39 @@ export default function App() {
       <CommandPalette />
       <QuickConnect />
       <SettingsDialog />
+      <HistoryDialog />
       <HostKeyDialog />
       <CloseGuardDialog />
       <ConfirmDialog />
       <Toasts />
     </div>
   );
+}
+
+interface SavedPane {
+  source: PaneSource;
+  path: string;
+}
+
+function readSavedPanes(): (SavedPane | undefined)[] {
+  try {
+    const v = JSON.parse(getPref("ui.pane_state") ?? "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Put a pane back on the server folder it was showing, if the site still
+    exists and the connection works; otherwise leave it where it is. */
+async function restoreRemote(side: 0 | 1, siteId: number, path: string, standIn: string) {
+  try {
+    if (!(await fetchSites()).some((s) => s.id === siteId)) return;
+    const home = await connectAndHome(siteId, path);
+    const cur = useUiStore.getState().panes[side];
+    // The user may have moved on while the connection came up.
+    if (cur.source === "local" && cur.path === standIn) useUiStore.getState().setPane(side, siteId, home);
+  } catch {
+    /* stay on the local folder */
+  }
 }

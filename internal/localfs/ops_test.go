@@ -147,3 +147,32 @@ func TestMoveRelocatesAndRefusesCollision(t *testing.T) {
 		t.Fatal("overwriting at destination was allowed")
 	}
 }
+
+func TestMoveRefusesIntoItself(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "a")
+	dst := filepath.Join(src, "inner")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Move([]string{src}, dst); err == nil {
+		t.Fatal("moved a folder into its own subfolder")
+	}
+}
+
+func TestTrashRemovesFromFolder(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "gone.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := Trash([]string{file}); err != nil || n != 1 {
+		t.Fatalf("Trash = %d, %v", n, err)
+	}
+	if _, err := os.Stat(file); err == nil {
+		t.Fatal("file still in place after Trash")
+	}
+	if _, err := Trash([]string{filepath.Join(dir, "never-existed")}); err == nil {
+		t.Fatal("trashing a missing path reported success")
+	}
+}

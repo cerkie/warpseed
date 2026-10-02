@@ -23,6 +23,9 @@ func (c *Client) Upload(ctx context.Context, localPath, remotePath string, onSta
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("upload cancelled: %w", err)
 	}
+	if c.ftp != nil {
+		return c.ftp.upload(ctx, localPath, remotePath, onStart, progress)
+	}
 
 	lf, err := os.Open(localPath)
 	if err != nil {
@@ -58,6 +61,17 @@ func (c *Client) Upload(ctx context.Context, localPath, remotePath string, onSta
 		notStale := st.ModTime().Add(clockSlack).After(lstat.ModTime())
 		if st.Size() <= localSize && notStale {
 			offset = st.Size()
+		}
+	}
+	if offset > 0 {
+		// Equal-or-smaller size and a recent mtime are not proof the part is
+		// ours; read its tail back and compare it with the source.
+		ok, err := c.remoteTailMatches(part, lf, offset)
+		if err != nil {
+			return fmt.Errorf("verify resume of %q: %w", part, err)
+		}
+		if !ok {
+			offset = 0
 		}
 	}
 	onStart(offset)

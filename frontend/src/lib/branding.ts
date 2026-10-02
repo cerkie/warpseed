@@ -5,26 +5,26 @@
 export const COMPANY = "Zyra Labs";
 export const WEBSITE_URL = "https://zyralabs.tech";
 export const DONATE_URL = "https://buymeacoffee.com/zyralabs";
-export const REPO_URL = "https://github.com/ZyraLabs/warpseed";
-export const SUPPORT_EMAIL = "warpseed@zyralabs.tech";
+/** This fork. The original is github.com/ZyraLabs/warpseed. */
+export const REPO_URL = "https://github.com/cerkie/warpseed";
 
 /**
- * A mailto: link to the support address with the version and platform
- * pre-filled, so a bug report arrives with the facts we always ask for.
+ * A link to a new issue on the fork's repository with the version and
+ * platform pre-filled, so a bug report arrives with the facts we always ask for.
  */
 export function bugReportUrl(version: string): string {
-  const subject = `warpseed ${version} bug report`;
   const body = [
-    "What happened:",
+    "**What happened:**",
     "",
-    "What I expected:",
+    "**What I expected:**",
     "",
-    "Steps to reproduce:",
+    "**Steps to reproduce:**",
     "1.",
     "",
     "---",
     `warpseed ${version}`,
     typeof navigator !== "undefined" ? navigator.userAgent : "",
   ].join("\n");
-  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const title = `Bug report (warpseed ${version})`;
+  return `${REPO_URL}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
 }

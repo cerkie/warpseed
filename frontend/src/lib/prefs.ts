@@ -9,6 +9,11 @@ export type PrefKey =
   | "ui.queue_columns"
   | "ui.pane_columns"
   | "ui.pane_sort"
+  | "ui.pane_split"
+  | "ui.pane_state"
+  | "ui.pane_hidden"
+  | "ui.notify"
+  | "ui.remote_side"
   | "ui.tree_width"
   | "ui.recents";
 
@@ -16,6 +21,11 @@ const ALL: PrefKey[] = [
   "ui.queue_columns",
   "ui.pane_columns",
   "ui.pane_sort",
+  "ui.pane_split",
+  "ui.pane_state",
+  "ui.pane_hidden",
+  "ui.notify",
+  "ui.remote_side",
   "ui.tree_width",
   "ui.recents",
 ];
@@ -27,6 +37,11 @@ const LEGACY: Record<PrefKey, string> = {
   "ui.pane_columns": "ws-pane-columns",
   "ui.pane_sort": "ws-pane-sort",
   // No pre-database name: the tree width arrived after the settings store did.
+  "ui.pane_split": "",
+  "ui.pane_state": "",
+  "ui.pane_hidden": "",
+  "ui.notify": "",
+  "ui.remote_side": "",
   "ui.tree_width": "",
   "ui.recents": "ws-recent-paths",
 };
@@ -125,3 +140,6 @@ export async function hydratePrefs(): Promise<Record<string, string>> {
   listeners.clear();
   return cfg;
 }
+
+/** The pane server connections go to: wherever the user last put one. */
+export const remoteSide = (): 0 | 1 => (getPref("ui.remote_side") === "0" ? 0 : 1);

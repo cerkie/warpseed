@@ -127,11 +127,55 @@ export namespace localfs {
 	        this.label = source["label"];
 	    }
 	}
+	export class Space {
+	    free: number;
+	    total: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Space(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.free = source["free"];
+	        this.total = source["total"];
+	    }
+	}
 
 }
 
 export namespace main {
 	
+	export class ClearResult {
+	    cleared: number;
+	    kept: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClearResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cleared = source["cleared"];
+	        this.kept = source["kept"];
+	    }
+	}
+	export class ConflictResult {
+	    resolved: number;
+	    skipped: number;
+	    failed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConflictResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.resolved = source["resolved"];
+	        this.skipped = source["skipped"];
+	        this.failed = source["failed"];
+	    }
+	}
 	export class DataInfo {
 	    path: string;
 	    folder: string;
@@ -152,6 +196,8 @@ export namespace main {
 	    src: string;
 	    size: number;
 	    isDir: boolean;
+	    modTime: string;
+	    move: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DownloadItem(source);
@@ -162,12 +208,35 @@ export namespace main {
 	        this.src = source["src"];
 	        this.size = source["size"];
 	        this.isDir = source["isDir"];
+	        this.modTime = source["modTime"];
+	        this.move = source["move"];
+	    }
+	}
+	export class UpdateInfo {
+	    current: string;
+	    latest: string;
+	    url: string;
+	    available: boolean;
+	    dismissed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.url = source["url"];
+	        this.available = source["available"];
+	        this.dismissed = source["dismissed"];
 	    }
 	}
 	export class UploadItem {
 	    src: string;
 	    size: number;
 	    isDir: boolean;
+	    move: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UploadItem(source);
@@ -178,6 +247,7 @@ export namespace main {
 	        this.src = source["src"];
 	        this.size = source["size"];
 	        this.isDir = source["isDir"];
+	        this.move = source["move"];
 	    }
 	}
 
@@ -203,6 +273,28 @@ export namespace queue {
 	        this.path = source["path"];
 	        this.label = source["label"];
 	        this.createdAt = source["createdAt"];
+	    }
+	}
+	export class HistoryEntry {
+	    siteName: string;
+	    direction: string;
+	    src: string;
+	    dst: string;
+	    size: number;
+	    finishedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HistoryEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.siteName = source["siteName"];
+	        this.direction = source["direction"];
+	        this.src = source["src"];
+	        this.dst = source["dst"];
+	        this.size = source["size"];
+	        this.finishedAt = source["finishedAt"];
 	    }
 	}
 	export class Site {
@@ -256,6 +348,10 @@ export namespace queue {
 	    srcMtime: number;
 	    createdAt: string;
 	    updatedAt: string;
+	    startedAt?: string;
+	    startBytes: number;
+	    conflict?: string;
+	    moveRoot: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Transfer(source);
@@ -279,6 +375,10 @@ export namespace queue {
 	        this.srcMtime = source["srcMtime"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
+	        this.startedAt = source["startedAt"];
+	        this.startBytes = source["startBytes"];
+	        this.conflict = source["conflict"];
+	        this.moveRoot = source["moveRoot"];
 	    }
 	}
 

@@ -221,7 +221,7 @@ const App = {
     return {
       current: "1.1.8",
       latest: want ? "1.2.0" : "1.1.8",
-      url: "https://github.com/ZyraLabs/warpseed/releases/tag/v1.2.0",
+      url: "https://github.com/cerkie/warpseed/releases/tag/v1.2.0",
       available: want,
       dismissed: false,
     };
@@ -316,6 +316,21 @@ const App = {
     // so anything keyed off fs:changed passed here and failed in the app.
     emit("fs:changed", { source: "local", siteId: 0, dir });
     emit("fs:changed", { source: "local", siteId: 0, dir: dest });
+    return paths.length;
+  },
+  async Notify() {},
+  async TransferHistory() {
+    return [];
+  },
+  async UpdateRepo() {
+    return "cerkie/warpseed";
+  },
+  async PickFile() {
+    return "C:\Users\you\.ssh\id_ed25519";
+  },
+  async MoveRemote(id: number, paths: string[], dest: string, dir: string) {
+    emit("fs:changed", { source: "remote", siteId: id, dir });
+    emit("fs:changed", { source: "remote", siteId: id, dir: dest });
     return paths.length;
   },
   async EnqueueDownloads(siteId: number, items: { src: string; size: number; isDir: boolean }[], localDir: string) {

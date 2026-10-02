@@ -11,6 +11,7 @@ import {
   deleteEntries,
   enqueueDownloads,
   enqueueUploads,
+  moveEntries,
   getSettings,
   localStart,
   makeDir,
@@ -43,6 +44,7 @@ import {
   ArrowUp,
   ChevronLeft,
   ChevronRight,
+  Close,
   Disc,
   File as FileIcon,
   Folder,
@@ -117,17 +119,16 @@ function matches(name: string, filter: string): boolean {
   return name.toLowerCase().includes(f);
 }
 
-/** Dragging rows from one pane to the other queues a transfer — the mouse
-    route to F5, and the only thing a drop does. A drag that cannot become a
-    transfer (within one pane, or between two panes of the same kind) is a
-    move, which deletes the source; that is a separate decision and is not
-    built, so those drags are simply never accepted.
+/** Dragging rows between the panes copies them (a transfer); holding Shift
+    moves them. A move across the two kinds of pane is copy-then-delete: the
+    original goes only after the copy has completed. A move within one kind
+    (a folder on this PC, or one server) is a rename and transfers nothing.
+    A drag from the same kind of pane is refused until Shift is held, and the
+    cursor note says so.
 
     The source KIND rides in the MIME type rather than only in the payload
     because `dragover` may read `dataTransfer.types` but not the data. That
-    is what lets a pane accept only the drags it can actually act on: drag
-    between two local panes and the cursor says "no drop" instead of
-    inviting a drop that would be refused on release. */
+    is what lets a pane decide, before the drop, what it can do with a drag. */
 const DRAG_FROM_LOCAL = "application/x-warpseed-from-local";
 const DRAG_FROM_SITE = "application/x-warpseed-from-site";
 
@@ -188,6 +189,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
   const askConfirm = useUiStore((s) => s.askConfirm);
   const sites = useUiStore((s) => s.sites);
   const connStates = useUiStore((s) => s.connStates);
+  const hiddenCols = useUiStore((s) => s.hiddenCols);
+  const toggleColumn = useUiStore((s) => s.toggleColumn);
   const setQuickConnect = useUiStore((s) => s.setQuickConnect);
 
   const nav = usePaneNav(side);
@@ -385,7 +388,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // enqueueItems queues remote files for download into the OTHER pane's
   // local directory (commander F5 semantics).
   const enqueueItems = useCallback(
-    async (items: FsEntry[]) => {
+    async (items: FsEntry[], move = false) => {
       if (typeof source !== "number" || !nav.listing) return;
       const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
       if (other.source !== "local") {
@@ -405,12 +408,13 @@ export default function FilePane({ side }: { side: PaneSide }) {
             size: e.size,
             isDir: e.isDir,
             modTime: e.modTime,
+            move,
           })),
           other.path,
         );
         setMarks(new Set());
         useUiStore.getState().setQueueOpen(true);
-        toast("success", `Queued ${items.length} item${items.length > 1 ? "s" : ""} for download`);
+        toast("success", `Queued ${items.length} item${items.length > 1 ? "s" : ""} ${move ? "to move" : "for download"}`);
       } catch (err) {
         toast("error", String(err));
       }
@@ -421,7 +425,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // uploadItems queues local files/folders for upload into the OTHER pane's
   // remote directory.
   const uploadItems = useCallback(
-    async (items: FsEntry[]) => {
+    async (items: FsEntry[], move = false) => {
       if (source !== "local" || !nav.listing) return;
       const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
       if (typeof other.source !== "number") {
@@ -439,11 +443,11 @@ export default function FilePane({ side }: { side: PaneSide }) {
       try {
         await enqueueUploads(
           other.source,
-          items.map((e) => ({ src: base + e.name, size: e.size, isDir: e.isDir })),
+          items.map((e) => ({ src: base + e.name, size: e.size, isDir: e.isDir, move })),
           other.path,
         );
         useUiStore.getState().setQueueOpen(true);
-        toast("success", `Queued ${items.length} item${items.length > 1 ? "s" : ""} for upload`);
+        toast("success", `Queued ${items.length} item${items.length > 1 ? "s" : ""} ${move ? "to move" : "for upload"}`);
       } catch (err) {
         toast("error", String(err));
       }
@@ -577,6 +581,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // whichever folder had shifted into that slot, and the files would be
   // queued somewhere the user never pointed at.
   const [dropOn, setDropOn] = useState<string | null>(null);
+  // The floating note beside the cursor while a drag is over this pane.
+  const [hint, setHint] = useState<{ x: number; y: number; text: string } | null>(null);
 
   const startDrag = useCallback(
     (ev: React.DragEvent, index: number) => {
@@ -608,8 +614,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
         })),
       };
       ev.dataTransfer.setData(dragType, JSON.stringify(payload));
-      // Copy, not move: a transfer leaves the source where it is.
-      ev.dataTransfer.effectAllowed = "copy";
+      // Copy unless Shift is held at the drop; a plain copy leaves the source.
+      ev.dataTransfer.effectAllowed = "copyMove";
     },
     [entries, marks, nav.listing, side, source, dragType, joinHere],
   );
@@ -624,19 +630,28 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // re-listing underneath it) never bubbles anywhere. The next drag then
   // starts with a stale outline still painted, so beginning one clears it.
   useEffect(() => {
-    const clear = () => setDropOn(null);
+    const clear = () => {
+      setDropOn(null);
+      setHint(null);
+    };
     for (const ev of ["dragend", "drop", "dragstart"]) window.addEventListener(ev, clear);
     return () => {
       for (const ev of ["dragend", "drop", "dragstart"]) window.removeEventListener(ev, clear);
     };
   }, []);
-
-  /** Whether this drag is one this pane can turn into a transfer. Runs on
-      every dragover, so it reads the types list and nothing else. */
-  const canAccept = useCallback(
-    (ev: React.DragEvent) => ev.dataTransfer.types.includes(acceptType),
-    [acceptType],
+  /** What dropping this drag here would do, from the types list and the
+      modifier keys alone (dragover may read nothing else). A drag from the
+      other kind of pane is a copy, or a move with Shift; a drag from this
+      kind of pane is a move, and only with Shift. */
+  const dropKind = useCallback(
+    (ev: React.DragEvent): "copy" | "move" | null => {
+      const types = ev.dataTransfer.types;
+      if (types.includes(acceptType)) return ev.shiftKey ? "move" : "copy";
+      return types.includes(dragType) && ev.shiftKey ? "move" : null;
+    },
+    [acceptType, dragType],
   );
+
 
   // Deliberately does NOT scroll the listing while a drag hovers its edge.
   // Three attempts at it each traded one dead end for another: suppressing
@@ -648,22 +663,42 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // is a target, and the pane itself always is.
   const overDrop = useCallback(
     (ev: React.DragEvent, dir: string) => {
-      if (!canAccept(ev)) return; // no preventDefault: the drop is not offered
-      ev.preventDefault();
+      const types = ev.dataTransfer.types;
+      const cross = types.includes(acceptType);
+      if (!cross && !types.includes(dragType)) return; // not a warpseed drag
       ev.stopPropagation();
-      ev.dataTransfer.dropEffect = "copy";
+      const kind = dropKind(ev);
+      // Say what a drop would do, and for the drags that are refused until
+      // Shift is held, that Shift is the way in.
+      const text = cross
+        ? kind === "move"
+          ? "Move — copies, then deletes the original"
+          : "Copy · hold Shift to move"
+        : kind === "move"
+          ? "Move here"
+          : "Hold Shift to move here";
+      setHint({ x: ev.clientX, y: ev.clientY, text });
+      if (!kind) {
+        setDropOn(null);
+        return; // no preventDefault: the drop is not offered
+      }
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = kind === "move" ? "move" : "copy";
       setDropOn(dir);
     },
-    [canAccept],
+    [acceptType, dragType, dropKind],
   );
+
 
   const doDrop = useCallback(
     (ev: React.DragEvent, dir: string) => {
-      if (!canAccept(ev)) return;
+      const kind = dropKind(ev);
+      if (!kind) return;
       ev.preventDefault();
       ev.stopPropagation();
       setDropOn(null);
-      // Everything below has already shown the accept outline and the copy
+      setHint(null);
+      // Everything below has already shown the accept outline and the drop
       // cursor, so a bail-out here looks to the user exactly like warpseed
       // losing the drag. Say so instead of doing nothing: the reachable
       // case is a selection too large for the platform's drag store, where
@@ -677,7 +712,10 @@ export default function FilePane({ side }: { side: PaneSide }) {
         lost();
         return;
       }
-      const raw = ev.dataTransfer.getData(acceptType);
+      // Same-kind drags are moves within one filesystem; across kinds it is
+      // a transfer, which a move turns into copy-then-delete.
+      const sameKind = !ev.dataTransfer.types.includes(acceptType);
+      const raw = ev.dataTransfer.getData(sameKind ? dragType : acceptType);
       if (!raw) {
         lost();
         return;
@@ -689,7 +727,6 @@ export default function FilePane({ side }: { side: PaneSide }) {
         lost();
         return;
       }
-      if (payload.side === side) return; // its own pane: nothing to transfer
       if (payload.items.length === 0) {
         lost();
         return;
@@ -699,23 +736,57 @@ export default function FilePane({ side }: { side: PaneSide }) {
       const dst = dir === PANE_DIR ? nav.listing.path : joinHere(dir);
       const n = payload.items.length;
       const noun = `${n} item${n === 1 ? "" : "s"}`;
-      const src = payload.items.map((e) => ({
-        src: payload.base + e.name,
-        size: e.size,
-        isDir: e.isDir,
-        modTime: e.modTime,
-      }));
-      const queued = (what: string) => {
-        useUiStore.getState().setQueueOpen(true);
-        toast("success", `Queued ${noun} for ${what}`);
+      const clearMarks = () => {
         if (payload.fromMarks) {
           // The other pane owns those marks, so ask it — the same bus the
-          // palette's "Deselect all" uses. Sent only once the transfer is
+          // palette's "Deselect all" uses. Sent only once the work is
           // actually queued: a failed drop leaves the selection to retry.
           window.dispatchEvent(
             new CustomEvent("ws:panecmd", { detail: { side: payload.side, cmd: "clearmarks" } }),
           );
         }
+      };
+
+      if (sameKind) {
+        if (payload.side === side && dir === PANE_DIR) return; // its own folder: nothing to do
+        if (payload.siteId !== (typeof source === "number" ? source : null)) {
+          toast("error", "Items cannot be moved directly from one server to another");
+          return;
+        }
+        const trimSep = (p: string) => p.replace(/(?<=.)[\\/]+$/, "");
+        const srcDir = trimSep(payload.base);
+        const strip = (p: string) => trimSep(p).toLowerCase();
+        if (strip(dst) === strip(srcDir)) return; // already in that folder
+        void moveEntries(
+          source,
+          payload.items.map((e) => payload.base + e.name),
+          dst,
+          srcDir,
+        )
+          .then(() => {
+            toast("success", `Moved ${noun}`);
+            clearMarks();
+          })
+          .catch((err: unknown) => toast("error", String(err)));
+        return;
+      }
+
+      if (payload.side === side) return; // its own pane: nothing to transfer
+      const move = kind === "move";
+      const src = payload.items.map((e) => ({
+        src: payload.base + e.name,
+        size: e.size,
+        isDir: e.isDir,
+        modTime: e.modTime,
+        move,
+      }));
+      const queued = (what: string) => {
+        useUiStore.getState().setQueueOpen(true);
+        toast(
+          "success",
+          move ? `Queued ${noun} to move — originals are deleted once they arrive` : `Queued ${noun} for ${what}`,
+        );
+        clearMarks();
       };
       if (source === "local") {
         if (payload.siteId === null) return; // gated by MIME; belt and braces
@@ -725,20 +796,45 @@ export default function FilePane({ side }: { side: PaneSide }) {
       } else if (typeof source === "number") {
         void enqueueUploads(
           source,
-          src.map(({ src: s, size, isDir }) => ({ src: s, size, isDir })),
+          src.map(({ src: s, size, isDir }) => ({ src: s, size, isDir, move })),
           dst,
         )
           .then(() => queued("upload"))
           .catch((err: unknown) => toast("error", String(err)));
       }
     },
-    [canAccept, acceptType, joinHere, nav.listing, side, source],
+    [dropKind, acceptType, dragType, joinHere, nav.listing, side, source],
   );
 
   const selection = useCallback((): FsEntry[] => {
     if (marks.size) return entries.filter((e) => marks.has(e.name));
     return entries[cursor] ? [entries[cursor]] : [];
   }, [marks, entries, cursor]);
+
+  // F6: move the selection to the other pane — a rename within one
+  // filesystem, or copy-then-delete across the two kinds of pane.
+  const moveSelection = useCallback(() => {
+    const sel = selection();
+    const other = useUiStore.getState().panes[side === 0 ? 1 : 0];
+    if (sel.length === 0 || !nav.listing) {
+      toast("error", "Nothing selected to move");
+    } else if (source === "local" && typeof other.source === "number") {
+      void uploadItems(sel, true);
+    } else if (typeof source === "number" && other.source === "local") {
+      void enqueueItems(sel, true);
+    } else if (source === other.source) {
+      const sep = sepFor(nav.listing.path, typeof source === "number");
+      const base = nav.listing.path.endsWith(sep) ? nav.listing.path : nav.listing.path + sep;
+      moveEntries(source, sel.map((e) => base + e.name), other.path, nav.listing.path)
+        .then(() => {
+          setMarks(new Set());
+          toast("success", `Moved ${sel.length} item${sel.length > 1 ? "s" : ""}`);
+        })
+        .catch((err: unknown) => toast("error", String(err)));
+    } else {
+      toast("error", "Items cannot be moved directly from one server to another");
+    }
+  }, [selection, side, nav.listing, source, uploadItems, enqueueItems]);
 
   // Explorer mouse selection: a plain click REPLACES the selection with that
   // one row (previously it only moved the cursor, so "click A, ctrl+click B"
@@ -776,9 +872,12 @@ export default function FilePane({ side }: { side: PaneSide }) {
       const names = items.length === 1 ? `“${items[0].name}”` : `${items.length} items`;
       askConfirm({
         title: `Delete ${names}?`,
-        body: items.some((e) => e.isDir)
-          ? "Folders are deleted with everything inside them. This cannot be undone."
-          : "This cannot be undone.",
+        body:
+          source === "local"
+            ? "They are moved to the Recycle Bin."
+            : items.some((e) => e.isDir)
+              ? "Folders are deleted with everything inside them. This cannot be undone."
+              : "This cannot be undone.",
         confirmLabel: "Delete",
         danger: true,
         suppressKey: "delete-files",
@@ -891,6 +990,9 @@ export default function FilePane({ side }: { side: PaneSide }) {
         e.preventDefault(); // F5 transfers — never reloads the webview
         if (typeof source === "number") void enqueueItems(selection());
         else void uploadItems(selection());
+      } else if (e.key === "F6" && !inField) {
+        e.preventDefault(); // F6 moves the selection to the other pane
+        moveSelection();
       } else if (e.ctrlKey && e.key.toLowerCase() === "r") {
         e.preventDefault(); // never let the webview reload itself
         nav.reload();
@@ -919,6 +1021,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
     doRename,
     doMkdir,
     doDelete,
+    moveSelection,
   ]);
 
   // Right-click on the path bar: make this folder the default, remember it,
@@ -1019,6 +1122,10 @@ export default function FilePane({ side }: { side: PaneSide }) {
       run: () => setMarks(new Set(entries.map((x) => x.name))),
     },
     ...sortItems(),
+    ...PANE_SIZED.map((c) => ({
+      label: `${hiddenCols.includes(c.id) ? "Show" : "Hide"} ${c.label.toLowerCase()} column`,
+      run: () => toggleColumn(c.id),
+    })),
   ];
 
   // Right-click menu items for the entry under the pointer (acting on the
@@ -1044,6 +1151,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
         run: () => void uploadItems(sel),
       });
     }
+    items.push({ label: `Move to other pane${count}`, hint: "F6", run: () => moveSelection() });
     if (entry.isDir) {
       items.push({ label: "Open", hint: "Enter", run: () => open(entry) });
     }
@@ -1297,6 +1405,12 @@ export default function FilePane({ side }: { side: PaneSide }) {
             ref={filterRef}
             value={filter}
             placeholder="filter… (* and ? glob)"
+            onBlur={(e) => {
+              // Clicking away closes an empty filter. One with text stays, so
+              // you can act on what it found; Esc or the X clears it. A blur
+              // from switching windows is not a click away.
+              if (e.currentTarget.value === "" && document.hasFocus()) setFilter(null);
+            }}
             onChange={(e) => setFilter(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
@@ -1313,6 +1427,18 @@ export default function FilePane({ side }: { side: PaneSide }) {
           <span>
             {entries.length} / {all.length}
           </span>
+          <button
+            className="pane__filter-close"
+            title="Close filter (Esc)"
+            aria-label="Close filter"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setFilter(null);
+              refocusList();
+            }}
+          >
+            <Close size={11} />
+          </button>
         </div>
       )}
 
@@ -1360,6 +1486,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
              on it used to be refused with a "no drop" cursor. Folder rows
              stopPropagation, so they still take the drop themselves. */
           className={`pane__list${dropOn === PANE_DIR ? " pane__list--dropping" : ""}`}
+          data-hide={hiddenCols.join(" ")}
           style={colStyle}
           role="grid"
           aria-rowcount={entries.length + 1}
@@ -1368,17 +1495,34 @@ export default function FilePane({ side }: { side: PaneSide }) {
           onDragLeave={(ev) => {
             // Only when the pointer has actually left the pane, not on the
             // leave fired for every row it crosses inside it.
-            if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setDropOn(null);
+            if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) {
+              setDropOn(null);
+              setHint(null);
+            }
           }}
           onDrop={(ev) => doDrop(ev, PANE_DIR)}
         >
+          {hint && (
+            <div className="drag-hint" style={{ left: hint.x + 16, top: hint.y + 20 }}>
+              {hint.text}
+            </div>
+          )}
           {/* Sortable, resizable headings: click to sort, drag the divider
               beside Size or Modified to give the name column more room. The
               grip is a SIBLING of the button, and pane.css reserves the
               padding it sits in — overlapping the button by even a few px
               hands those clicks to the grip and the sort never fires. */}
           <div role="rowgroup">
-            <div className="row row--head" role="row">
+            <div
+              className="row row--head"
+              role="row"
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                setActivePane(side);
+                setBgMenu({ x: ev.clientX, y: ev.clientY });
+              }}
+            >
               <div
                 className="phead-cell"
                 role="columnheader"
@@ -1409,7 +1553,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
                 return (
                   <div
                     key={c.id}
-                    className="phead-cell"
+                    className={`phead-cell col-${c.id}`}
                     role="columnheader"
                     aria-colindex={i + 2}
                     aria-sort={ariaSort(key)}
@@ -1526,13 +1670,13 @@ export default function FilePane({ side }: { side: PaneSide }) {
                     <span className={e.isDir ? "row__icon row__icon--dir" : "row__icon"}>
                       <RowIcon size={15} />
                     </span>
-                    {e.name}
+                    <span className="row__text">{e.name}</span>
                   </span>
                   {/* Folders carry the -1 size sentinel, which formats to an
                       empty string — a whole column of nothing on a seedbox
                       root reads as a column that cannot be sorted. */}
-                  <span className="row__size">{e.isDir ? "—" : formatSize(e.size)}</span>
-                  <span className="row__time">{formatTime(e.modTime)}</span>
+                  <span className="row__size col-psize">{e.isDir ? "—" : formatSize(e.size)}</span>
+                  <span className="row__time col-pdate">{formatTime(e.modTime)}</span>
                 </div>
               );
             })}

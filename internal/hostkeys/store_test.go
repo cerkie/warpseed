@@ -100,3 +100,21 @@ func TestChangedKeyAlarms(t *testing.T) {
 		t.Fatalf("err = %v, want KeyChangedError", err)
 	}
 }
+
+func TestVerifyCertPins(t *testing.T) {
+	st := New(testDB(t).DB())
+	fp := CertFingerprint([]byte("cert-one"))
+	if err := st.Verify(1, CertAlgo, fp, nil); !errors.Is(err, ErrRejected) {
+		t.Fatalf("unknown cert with nil prompt = %v, want ErrRejected", err)
+	}
+	if err := st.Verify(1, CertAlgo, fp, func(string, string) bool { return true }); err != nil {
+		t.Fatalf("TOFU pin: %v", err)
+	}
+	if err := st.Verify(1, CertAlgo, fp, nil); err != nil {
+		t.Fatalf("pinned cert rejected: %v", err)
+	}
+	var changed *KeyChangedError
+	if err := st.Verify(1, CertAlgo, CertFingerprint([]byte("cert-two")), nil); !errors.As(err, &changed) {
+		t.Fatalf("changed cert = %v, want KeyChangedError", err)
+	}
+}

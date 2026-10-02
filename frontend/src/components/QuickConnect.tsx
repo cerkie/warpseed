@@ -1,34 +1,38 @@
 import { useEffect, useState } from "react";
 import {
   connectAndHome,
-  deleteSite,
   saveSite,
   sites as fetchSites,
   type Site,
 } from "../ipc";
-import { forgetSource } from "../lib/recents";
+import { friendlyError } from "../lib/errors";
+import { askDeleteSite } from "../lib/sites";
 import { useUiStore } from "../store";
-import { Close } from "./Icon";
+import { Close, Pencil } from "./Icon";
+import ProtocolField from "./ProtocolField";
+import AutoConnectField from "./AutoConnectField";
+import { DEFAULT_FORM, DEFAULT_PORT, formFields, formOf, secretLabel } from "../lib/protocol";
 
-const EMPTY = { name: "", host: "", port: 22, username: "", password: "" };
+const EMPTY = { name: "", host: "", port: 22, username: "", password: "", ...DEFAULT_FORM };
 
 /** Quick-connect: saved sites + a new-site form (ux-spec §5.1, popover-not-
     wizard). Password goes to Windows Credential Manager, never the DB. */
 export default function QuickConnect() {
   const { open, side } = useUiStore((s) => s.quickConnect);
   const setQuickConnect = useUiStore((s) => s.setQuickConnect);
-  const askConfirm = useUiStore((s) => s.askConfirm);
   const setPane = useUiStore((s) => s.setPane);
   const siteList = useUiStore((s) => s.sites);
   const setSites = useUiStore((s) => s.setSites);
 
   const [form, setForm] = useState(EMPTY);
+  const [editing, setEditing] = useState<Site | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (open) {
       setForm(EMPTY);
+      setEditing(null);
       setError("");
       void fetchSites().then(setSites).catch(() => undefined);
     }
@@ -46,10 +50,17 @@ export default function QuickConnect() {
       setPane(side, s.id, home);
       close();
     } catch (err) {
-      setError(String(err));
+      setError(friendlyError(err));
     } finally {
       setBusy(false);
     }
+  };
+
+  const startEdit = (e: React.MouseEvent, s: Site) => {
+    e.stopPropagation();
+    setEditing(s);
+    setForm({ name: s.name, host: s.host, port: s.port, username: s.username, password: "", ...formOf(s) });
+    setError("");
   };
 
   const saveAndConnect = async () => {
@@ -58,10 +69,13 @@ export default function QuickConnect() {
     try {
       const saved = await saveSite(
         {
+          id: editing?.id,
+          remotePath: editing?.remotePath,
+          maxTransfers: editing?.maxTransfers,
           name: form.name.trim() || form.host.trim(),
-          protocol: "sftp",
+          ...formFields(form),
           host: form.host.trim(),
-          port: Number(form.port) || 22,
+          port: Number(form.port) || DEFAULT_PORT[form.mode],
           username: form.username.trim(),
         },
         form.password,
@@ -71,7 +85,7 @@ export default function QuickConnect() {
       setPane(side, saved.id, home);
       close();
     } catch (err) {
-      setError(String(err));
+      setError(friendlyError(err));
     } finally {
       setBusy(false);
     }
@@ -79,28 +93,7 @@ export default function QuickConnect() {
 
   const removeSite = (e: React.MouseEvent, s: Site) => {
     e.stopPropagation();
-    // A saved site carries its password, its pinned host key and its
-    // bookmarks, and none of it comes back. One stray click on a row's X
-    // used to be enough.
-    askConfirm({
-      title: `Delete ${s.name}?`,
-      body: "Its saved password, bookmarks and pinned host key go with it. Queued transfers for this site are not affected.",
-      confirmLabel: "Delete site",
-      danger: true,
-      suppressKey: "delete-site",
-      onConfirm: () => {
-        void (async () => {
-          try {
-            await deleteSite(s.id);
-            // SQLite recycles rowids, so this site's jump list must go too.
-            forgetSource(s.id);
-            setSites(await fetchSites());
-          } catch (err) {
-            setError(String(err));
-          }
-        })();
-      },
-    });
+    askDeleteSite(s, () => undefined, (err) => setError(friendlyError(err)));
   };
 
   return (
@@ -114,9 +107,12 @@ export default function QuickConnect() {
               <div key={s.id} className="site-row" onClick={() => void connectExisting(s)}>
                 <span className="name">{s.name}</span>
                 <span className="host">
-                  {s.username}@{s.host}:{s.port}
+                  {s.protocol === "ftps" ? "ftps://" : "sftp://"}{s.username}@{s.host}:{s.port}
                 </span>
-                <button className="del" title="Delete site" onClick={(e) => void removeSite(e, s)}>
+                <button className="edit" title="Edit site" aria-label={`Edit ${s.name}`} onClick={(e) => startEdit(e, s)}>
+                  <Pencil size={13} />
+                </button>
+                <button className="del" title="Delete site" aria-label={`Delete ${s.name}`} onClick={(e) => void removeSite(e, s)}>
                   <Close size={13} />
                 </button>
               </div>
@@ -125,6 +121,7 @@ export default function QuickConnect() {
         )}
 
         <div className="form-grid">
+          <ProtocolField form={form} port={Number(form.port)} onChange={(next, port) => setForm({ ...form, ...next, port })} />
           <div className="field wide">
             <label>Host</label>
             <input
@@ -157,16 +154,19 @@ export default function QuickConnect() {
               onChange={(e) => setForm({ ...form, username: e.target.value })}
             />
           </div>
+          {secretLabel(form) && (
           <div className="field">
-            <label>Password</label>
+            <label>{secretLabel(form)}</label>
             <input
               type="password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               onKeyDown={(e) => e.key === "Enter" && void saveAndConnect()}
             />
-            <span className="note">stored in Windows Credential Manager, never on disk</span>
+            <span className="note">{editing ? "leave blank to keep the saved password" : "stored in Windows Credential Manager, never on disk"}</span>
           </div>
+          )}
+          <AutoConnectField checked={form.autoConnect} onChange={(autoConnect) => setForm({ ...form, autoConnect })} />
         </div>
 
         {error && <div className="form-error">{error}</div>}
@@ -180,7 +180,7 @@ export default function QuickConnect() {
             disabled={busy || !form.host || !form.username}
             onClick={() => void saveAndConnect()}
           >
-            {busy ? "Connecting…" : "Save & connect"}
+            {busy ? "Connecting…" : editing ? "Save changes & connect" : "Save & connect"}
           </button>
         </div>
       </div>

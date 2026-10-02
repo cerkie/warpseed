@@ -170,4 +170,27 @@ var migrations = []string{
 	UPDATE settings SET value='8' WHERE key='transfers.site_max'   AND value='6';
 	UPDATE settings SET value='8' WHERE key='transfers.global_max' AND value='6';
 	`,
+
+	// 014 — moves. A non-empty move_root marks a transfer whose source is to
+	// be deleted once it has completed and been verified; the value is the
+	// top-level item the user moved, so emptied folders can be pruned back to
+	// it and no further.
+	`
+	ALTER TABLE transfers ADD COLUMN move_root TEXT NOT NULL DEFAULT '';
+	`,
+
+	// 015 — history. Clearing finished transfers from the queue moves them
+	// here first, so what warpseed has done outlives the queue view. No
+	// foreign key: deleting a site must not erase what was moved from it.
+	`
+	CREATE TABLE history (
+		id          INTEGER PRIMARY KEY,
+		site_name   TEXT NOT NULL,
+		direction   TEXT NOT NULL,
+		src         TEXT NOT NULL,
+		dst         TEXT NOT NULL,
+		size        INTEGER NOT NULL,
+		finished_at TEXT NOT NULL
+	);
+	`,
 }

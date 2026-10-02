@@ -23,13 +23,19 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 16, G: 18, B: 24, A: 1},
+		BackgroundColour: &options.RGBA{R: 18, G: 19, B: 20, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		// NOT HideWindowOnClose: that branch skips OnBeforeClose entirely, and
 		// with no tray in Wails v2 a hidden window is one only Task Manager
 		// can find.
 		OnBeforeClose: app.beforeClose,
+		// A second launch brings the running one forward instead of opening a
+		// second window onto the same database.
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               "tech.zyralabs.warpseed",
+			OnSecondInstanceLaunch: app.secondInstance,
+		},
 		Bind: []interface{}{
 			app,
 		},

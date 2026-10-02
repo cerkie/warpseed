@@ -1,10 +1,9 @@
 /* warpseed design tokens v4 — three themes from the design boards:
-   Clay (default light), Cobalt (light), Iris (dark). A theme is selected
-   by stamping data-theme on <html>; Clay is also the no-attribute fallback.
+   Graphite (default dark), Clay and Cobalt (light), Iris (dark). A theme is selected
+   by stamping data-theme on <html>; Graphite is also the no-attribute fallback.
    Only color tokens are redefined per theme — structure (type, radii,
    density) is shared, and components never name a theme. */
 
-:root,
 [data-theme="clay"] {
   color-scheme: light;
 
@@ -111,6 +110,41 @@
   --shadow-2: 0 16px 48px rgb(4 2 16 / 0.55);
 }
 
+:root:not([data-theme]),
+[data-theme="graphite"] {
+  color-scheme: dark;
+
+  --surface-0: #121314;
+  --surface-1: #191a1c;
+  --surface-2: #202124;
+  --surface-3: #28292d;
+  --surface-4: #313236;
+  --surface-card: #191a1c;
+
+  --text: #e9eaec;
+  --text-mid: #bfc1c6;
+  --text-dim: #93969c;
+  --text-faint: #686b72;
+
+  --accent: #34d1bf;
+  --accent-dim: #28a99b;
+  --accent-glow: rgb(52 209 191 / 0.16);
+  --on-accent: #06201d;
+
+  --state-done: #9be26f;
+  --state-paused: #e3b341;
+  --state-error: #ff6b6b;
+  /* uploads: blue — the accent is teal and done is green */
+  --state-upload: #6aa8ff;
+  --folder: #8f939b;
+
+  --border: #26272b;
+  --border-strong: #3a3b40;
+  --scrim: rgb(0 0 0 / 0.62);
+  --shadow-1: 0 8px 24px rgb(0 0 0 / 0.55);
+  --shadow-2: 0 16px 48px rgb(0 0 0 / 0.6);
+}
+
 /* ── tokens shared by every theme ─────────────────────────────────── */
 :root {
   /* transfer states read from the palette above; active is always the accent */
@@ -152,4 +186,15 @@
   --dur-slow: 240ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+}
+
+/* Native dropdown lists are drawn by the webview from these, not from the
+   select's own colours, so they must be themed explicitly. */
+select {
+  color-scheme: inherit;
+}
+select option,
+select optgroup {
+  background-color: var(--surface-2);
+  color: var(--text);
 }

@@ -1,10 +1,10 @@
-/* Theme mechanism: data-theme on <html>, Clay as the no-attribute fallback.
+/* Theme mechanism: data-theme on <html>, Graphite as the no-attribute fallback.
    A localStorage mirror lets main.tsx stamp the theme before first render
    (no flash); the settings database remains the source of truth. Legacy ids
    (v3 themes, "dark"/"light", "system") coerce to the nearest v4 theme. */
 
-export type ThemeId = "clay" | "cobalt" | "iris";
-/** "system" survives in stored settings from older builds; it coerces to clay. */
+export type ThemeId = "clay" | "cobalt" | "iris" | "graphite";
+/** "system" survives in stored settings from older builds; it coerces to the default. */
 export type ThemePref = ThemeId | "system";
 
 export interface ThemeInfo {
@@ -18,6 +18,12 @@ export interface ThemeInfo {
 /** Hex mirrors of each palette, for the picker's preview chips only —
     the app itself always reads the tokens in tokens.css. */
 export const THEMES: ThemeInfo[] = [
+  {
+    id: "graphite",
+    name: "Graphite",
+    blurb: "The default. Deep graphite with a cool teal accent.",
+    swatch: ["#121314", "#191a1c", "#34d1bf"],
+  },
   {
     id: "clay",
     name: "Clay",
@@ -33,11 +39,10 @@ export const THEMES: ThemeInfo[] = [
   {
     id: "iris",
     name: "Iris",
-    blurb: "The dark one — violet-black ground, periwinkle glow.",
+    blurb: "Violet-black ground, periwinkle glow.",
     swatch: ["#0e0b1f", "#171332", "#8b7bff"],
   },
 ];
-
 const MIRROR_KEY = "ws-theme";
 
 function stamp(theme: ThemeId) {
@@ -51,6 +56,7 @@ export function coerceTheme(value: string | null): ThemeId {
     case "clay":
     case "cobalt":
     case "iris":
+    case "graphite":
       return value;
     case "dark":
     case "flightdeck":
@@ -58,9 +64,12 @@ export function coerceTheme(value: string | null): ThemeId {
       return "iris";
     case "press":
       return "cobalt";
-    // "light", "drafting", "system" and anything unknown land on the default.
-    default:
+    case "light":
+    case "drafting":
       return "clay";
+    // "system", empty (a new install) and anything unknown land on the default.
+    default:
+      return "graphite";
   }
 }
 

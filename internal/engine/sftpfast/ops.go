@@ -22,6 +22,9 @@ func validRemoteName(name string) error {
 
 // Remove deletes a remote file, or a directory and everything under it.
 func (c *Client) Remove(ctx context.Context, remotePath string) error {
+	if c.ftp != nil {
+		return c.ftp.remove(ctx, remotePath)
+	}
 	clean := path.Clean(remotePath)
 	if clean == "/" || clean == "." || clean == "" {
 		return fmt.Errorf("refusing to delete %q", remotePath)
@@ -87,6 +90,9 @@ func (c *Client) RenameEntry(remotePath, newName string) error {
 	if err := validRemoteName(newName); err != nil {
 		return err
 	}
+	if c.ftp != nil {
+		return c.ftp.renameEntry(remotePath, newName)
+	}
 	clean := path.Clean(remotePath)
 	target := path.Join(path.Dir(clean), newName)
 	if _, err := c.sftp.Stat(target); err == nil {
@@ -103,8 +109,32 @@ func (c *Client) MkdirEntry(parent, name string) error {
 	if err := validRemoteName(name); err != nil {
 		return err
 	}
+	if c.ftp != nil {
+		return c.ftp.mkdirEntry(parent, name)
+	}
 	if err := c.sftp.Mkdir(path.Join(path.Clean(parent), name)); err != nil {
 		return fmt.Errorf("create folder %q: %w", name, err)
 	}
 	return nil
+}
+
+// RemoveEmptyDir deletes a directory only if it is empty; a non-empty one is
+// an error, never a recursive delete.
+func (c *Client) RemoveEmptyDir(remotePath string) error {
+	if c.ftp != nil {
+		return c.ftp.removeEmptyDir(remotePath)
+	}
+	return c.sftp.RemoveDirectory(remotePath)
+}
+
+// MoveEntry renames a remote entry to a new full path, which may be in
+// another directory. An existing destination is an error, never overwritten.
+func (c *Client) MoveEntry(src, dst string) error {
+	if _, err := c.stat(dst); err == nil {
+		return fmt.Errorf("%q already exists", path.Base(dst))
+	}
+	if c.ftp != nil {
+		return c.ftp.rename(src, dst)
+	}
+	return c.sftp.Rename(src, dst)
 }

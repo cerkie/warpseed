@@ -4,7 +4,7 @@ warpseed is a fast, free transfer client for Windows built for seedbox
 workloads: parallel connections, byte-level resume that survives errors
 and restarts, and a queue you can leave running overnight.
 
-This guide covers everything in version 1.0. If something here doesn't
+This guide covers everything in version 1.2. If something here doesn't
 match what you see, that's a bug — [report it](#getting-help).
 
 ---
@@ -89,7 +89,7 @@ if it ever changes, warpseed refuses to connect and tells you loudly —
 that is the one situation where you should stop and check with your
 provider before doing anything else.
 
-> **SFTP only, password auth only** in 1.0. SSH keys/agent, FTP/FTPS, S3
+> **SFTP and FTPS.** Log in with a password, a private key file or the SSH agent (SFTP). S3
 > and WebDAV are planned.
 
 ---
@@ -384,8 +384,12 @@ full window back.
 
 Open with **Ctrl+,** or the gear icon.
 
-**Appearance** — three themes: **Clay** (default, warm light),
+**Appearance** — four themes: **Graphite** (default, dark with a teal accent), **Clay** (warm light),
 **Cobalt** (cool light) and **Iris** (dark).
+
+| Graphite (default) | Clay |
+|---|---|
+| ![Graphite](screenshots/theme-graphite.png) | ![Clay](screenshots/theme-clay.png) |
 
 | Cobalt | Iris |
 |---|---|
@@ -416,8 +420,8 @@ password, initial remote path, and a per-site max-transfers override.
 **Data** — shows where the settings/queue database lives, with buttons
 to open that folder and to make a backup copy.
 
-**About** — version, links to zyralabs.tech, **Report a bug** (opens an
-email to warpseed@zyralabs.tech with the version pre-filled), and
+**About** — version, links to zyralabs.tech, **Report a bug** (opens a new
+issue on github.com/cerkie/warpseed with the version pre-filled), and
 **Support warpseed**.
 
 ---
@@ -517,11 +521,36 @@ exhausts retries, hit retry once the server is responsive again.
 
 ## Getting help
 
-Use **Settings → About → Report a bug**, or email
-**warpseed@zyralabs.tech** with what happened, what you expected, and
+Use **Settings → Data & About → Report a bug**, or open an issue at
+**github.com/cerkie/warpseed/issues** with what happened, what you expected, and
 your warpseed version. Reports are handled on an urgency basis.
 
 warpseed is free and always will be. If it saves you time,
 [a coffee keeps the updates coming](https://buymeacoffee.com/zyralabs).
 
 Source: [github.com/ZyraLabs/warpseed](https://github.com/ZyraLabs/warpseed) · MIT © 2026 Zyra Labs
+
+## Moving files
+
+Drag files between the panes to copy them. Hold **Shift** while dropping (or
+press **F6**) to move them instead.
+
+- Between This PC and a server, a move copies the files and deletes the
+  originals only after each copy has arrived complete. Folders that end up
+  empty are removed too. If a delete fails, the original stays and warpseed
+  says so.
+- Inside one folder tree (on This PC, or on one server) a move is a rename:
+  nothing is transferred. You cannot move directly from one server to another.
+- Drag without Shift between two panes of the same kind and a small note
+  beside the cursor tells you to hold Shift.
+
+## Other things worth knowing
+
+- **Bandwidth schedule** (Settings, Transfers): slow transfers down between two
+  hours of the day. It can only tighten the limit you already set.
+- **Notifications** (Settings, General): a desktop notice when the queue
+  finishes while warpseed is in the background.
+- **Transfer history** (Settings, Data & About, or Ctrl+K): finished transfers
+  you have cleared from the queue.
+- **Connect on launch** is a checkbox on each saved site.
+- **Columns:** right-click the column headings to hide Size or Modified.

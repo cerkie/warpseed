@@ -1,10 +1,19 @@
-# warpseed — fast SFTP transfer client for Windows
+# warpseed — fast SFTP and FTPS transfer client for Windows
 
 A free, portable Windows x64 client for seedbox workloads: multi-connection
 ("Hyperlane") transfers, byte-level resume that survives errors and restarts,
-and a queue you can trust with an overnight 50 GB run. Released by Zyra Labs at
-`github.com/ZyraLabs/warpseed` (MIT). No issues or PRs are taken on the public
-repo; bugs arrive at warpseed@zyralabs.tech.
+and a queue you can trust with an overnight 50 GB run. Created by Zyra Labs
+(`github.com/ZyraLabs/warpseed`, MIT); this checkout is the `cerkie/warpseed`
+fork, where bugs are reported as GitHub issues.
+
+## This fork
+
+This checkout is the `cerkie/warpseed` fork. Its issues and PRs live in that repo.
+`docs/fork.md` lists what the fork changed
+and where. `push.sh`, `release.ps1` and the `release.yml` workflow are the
+upstream author's tooling; the fork releases with `gh release create`.
+A new persisted setting needs an entry in `settingValidators` (app.go), or
+`SetSetting` rejects it silently.
 
 ## Read first
 

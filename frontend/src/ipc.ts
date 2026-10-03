@@ -17,6 +17,8 @@ import {
   RetryFailedTransfers,
   ConnectSite,
   DeleteLocal,
+  DeleteLocalPermanently,
+  ImportSites,
   DeleteRemote,
   DeleteSite,
   DisconnectSite,
@@ -24,7 +26,7 @@ import {
   LogDir,
   EnqueueUploads,
   EnqueueUploadsFromPaths,
-  DragBase,
+  StartDragOut,
   GetSettings,
   AddBookmark,
   BackupData,
@@ -156,6 +158,9 @@ export const deleteEntries = (
   dir: string,
 ): Promise<number> =>
   source === "local" ? DeleteLocal(paths, dir) : DeleteRemote(source, paths, dir);
+
+export const deleteLocalPermanently = (paths: string[], dir: string): Promise<number> =>
+  DeleteLocalPermanently(paths, dir);
 
 export const renameEntry = (
   source: PaneSource,
@@ -461,10 +466,20 @@ export const transferHistory = (): Promise<HistoryEntry[]> =>
 export const updateRepo = (): Promise<string> => UpdateRepo();
 
 /** URL prefix of the local server that lets a file be dragged out to Explorer. */
-export const dragBase = (): Promise<string> => DragBase();
+export type DragOutItem = { path: string; name: string; size: number; modTime: string; isDir: boolean };
+export const startDragOut = (siteId: number, items: DragOutItem[]): Promise<void> => StartDragOut(siteId, items as never);
 
 export const enqueueUploadsFromPaths = (
   siteId: number,
   paths: string[],
   remoteDir: string,
 ): Promise<number[]> => EnqueueUploadsFromPaths(siteId, paths, remoteDir) as Promise<number[]>;
+
+export interface ImportResult {
+  added: number;
+  duplicates: number;
+  unsupported: number;
+  passwords: number;
+  ppkKeys: number;
+}
+export const importSites = (file: string): Promise<ImportResult> => ImportSites(file);

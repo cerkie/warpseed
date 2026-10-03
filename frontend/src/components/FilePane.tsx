@@ -9,6 +9,7 @@ import {
   connectAndHome,
   deleteBookmark,
   deleteEntries,
+  deleteLocalPermanently,
   enqueueDownloads,
   enqueueUploads,
   moveEntries,
@@ -36,7 +37,7 @@ import {
 } from "../lib/path";
 import { recentPaths, rememberPath } from "../lib/recents";
 import { otherSide, useUiStore, type PaneSide } from "../store";
-import { downloadUrl } from "../lib/dragOut";
+import { armDragOut } from "../lib/dragOut";
 import Breadcrumb from "./Breadcrumb";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import DirTree from "./DirTree";
@@ -389,7 +390,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // enqueueItems queues remote files for download into the OTHER pane's
   // local directory (commander F5 semantics).
   const enqueueItems = useCallback(
-    async (items: FsEntry[], move = false) => {
+    async (items: FsEntry[]) => {
       if (typeof source !== "number" || !nav.listing) return;
       const other = useUiStore.getState().panes[otherSide(side)];
       if (other.source !== "local") {
@@ -409,13 +410,13 @@ export default function FilePane({ side }: { side: PaneSide }) {
             size: e.size,
             isDir: e.isDir,
             modTime: e.modTime,
-            move,
+            move: false,
           })),
           other.path,
         );
         setMarks(new Set());
         useUiStore.getState().setQueueOpen(true);
-        toast("success", `Queued ${items.length} item${items.length > 1 ? "s" : ""} ${move ? "to move" : "for download"}`);
+        toast("success", `Queued ${items.length} item${items.length > 1 ? "s" : ""} for download`);
       } catch (err) {
         toast("error", String(err));
       }
@@ -583,7 +584,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   // queued somewhere the user never pointed at.
   const [dropOn, setDropOn] = useState<string | null>(null);
   // The floating note beside the cursor while a drag is over this pane.
-  const [hint, setHint] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
   const startDrag = useCallback(
     (ev: React.DragEvent, index: number) => {
@@ -615,11 +616,14 @@ export default function FilePane({ side }: { side: PaneSide }) {
         })),
       };
       ev.dataTransfer.setData(dragType, JSON.stringify(payload));
-      // A single file can also be dragged out to Explorer.
-      if (picked.length === 1 && !picked[0].isDir) {
-        const url = downloadUrl(payload.siteId, payload.base + picked[0].name, picked[0].name);
-        if (url) ev.dataTransfer.setData("DownloadURL", url);
-      }
+      // If the drag leaves the window it carries on as a native drag, so the
+      // files can be dropped in Explorer or any other file manager. Server
+      // folders and files both work: the app queues the downloads.
+      armDragOut(
+        payload.siteId,
+        picked
+          .map((e) => ({ path: payload.base + e.name, name: e.name, size: e.size, modTime: e.modTime, isDir: e.isDir })),
+      );
       // Copy unless Shift is held at the drop; a plain copy leaves the source.
       ev.dataTransfer.effectAllowed = "copyMove";
     },
@@ -652,10 +656,12 @@ export default function FilePane({ side }: { side: PaneSide }) {
   const dropKind = useCallback(
     (ev: React.DragEvent): "copy" | "move" | null => {
       const types = ev.dataTransfer.types;
-      if (types.includes(acceptType)) return ev.shiftKey ? "move" : "copy";
+      // Files from a server are only ever copied to this PC; a move would
+      // delete the server's original.
+      if (types.includes(acceptType)) return ev.shiftKey && source !== "local" ? "move" : "copy";
       return types.includes(dragType) && ev.shiftKey ? "move" : null;
     },
-    [acceptType, dragType],
+    [acceptType, dragType, source],
   );
 
 
@@ -679,11 +685,13 @@ export default function FilePane({ side }: { side: PaneSide }) {
       const text = cross
         ? kind === "move"
           ? "Move — copies, then deletes the original"
-          : "Copy · hold Shift to move"
+          : source === "local"
+            ? "Copy"
+            : "Copy · hold Shift to move"
         : kind === "move"
           ? "Move here"
           : "Hold Shift to move here";
-      setHint({ x: ev.clientX, y: ev.clientY, text });
+      setHint(text);
       if (!kind) {
         setDropOn(null);
         return; // no preventDefault: the drop is not offered
@@ -827,7 +835,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
     } else if (source === "local" && typeof other.source === "number") {
       void uploadItems(sel, true);
     } else if (typeof source === "number" && other.source === "local") {
-      void enqueueItems(sel, true);
+      toast("error", "Files on a server are copied, not moved. Press F5 to download a copy.");
     } else if (source === other.source) {
       const sep = sepFor(nav.listing.path, typeof source === "number");
       const base = nav.listing.path.endsWith(sep) ? nav.listing.path : nav.listing.path + sep;
@@ -897,7 +905,30 @@ export default function FilePane({ side }: { side: PaneSide }) {
               setMarks(new Set());
               toast("success", `Deleted ${n} item${n === 1 ? "" : "s"}`);
             })
-            .catch((err: unknown) => toast("error", String(err)))
+            .catch((err: unknown) => {
+              if (!String(err).includes("TOO_LONG_FOR_RECYCLE_BIN")) {
+                toast("error", String(err));
+                return;
+              }
+              // The Recycle Bin cannot hold a path over 260 characters; offer
+              // the permanent delete Explorer would, never do it unasked.
+              const dir = nav.listing?.path ?? path;
+              askConfirm({
+                title: "Delete permanently?",
+                body: "A path in here is longer than 260 characters, which the Recycle Bin cannot hold. It will be deleted for good and cannot be undone.",
+                confirmLabel: "Delete permanently",
+                danger: true,
+                onConfirm: () => {
+                  void deleteLocalPermanently(
+                    items.map((e) => joinHere(e.name)),
+                    dir,
+                  )
+                    .then((n) => toast("success", `Deleted ${n} item${n === 1 ? "" : "s"}`))
+                    .catch((e2: unknown) => toast("error", String(e2)))
+                    .finally(() => nav.reload());
+                },
+              });
+            })
             .finally(() => nav.reload());
         },
       });
@@ -1157,7 +1188,10 @@ export default function FilePane({ side }: { side: PaneSide }) {
         run: () => void uploadItems(sel),
       });
     }
-    items.push({ label: `Move to other pane${count}`, hint: "F6", run: () => moveSelection() });
+    // A server's files are never moved to this PC (that would delete them there).
+    if (!(typeof source === "number" && other.source === "local")) {
+      items.push({ label: `Move to other pane${count}`, hint: "F6", run: () => moveSelection() });
+    }
     if (entry.isDir) {
       items.push({ label: "Open", hint: "Enter", run: () => open(entry) });
     }
@@ -1511,8 +1545,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
           onDrop={(ev) => doDrop(ev, PANE_DIR)}
         >
           {hint && (
-            <div className="drag-hint" style={{ left: hint.x + 16, top: hint.y + 20 }}>
-              {hint.text}
+            <div className="drag-hint">
+              {hint}
             </div>
           )}
           {/* Sortable, resizable headings: click to sort, drag the divider

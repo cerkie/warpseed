@@ -209,6 +209,7 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
+  position: relative;
 }
 
 /* column headers: uppercase 10.5px, letterspaced, dim.
@@ -547,9 +548,14 @@
   outline-offset: -1px;
 }
 
-/* The note that follows the pointer during a drag, saying what a drop does. */
+/* The note pinned to the bottom of a pane during a drag, saying what a drop
+   does. It does not follow the pointer: drag events arrive too slowly for
+   that to look smooth. */
 .drag-hint {
-  position: fixed;
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
   z-index: 50;
   pointer-events: none;
   padding: 4px 9px;

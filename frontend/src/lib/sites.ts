@@ -1,4 +1,4 @@
-import { deleteSite, sites as fetchSites, type Site } from "../ipc";
+import { deleteSite, importSites, pickFile, sites as fetchSites, type Site } from "../ipc";
 import { forgetSource } from "./recents";
 import { useUiStore } from "../store";
 
@@ -25,4 +25,20 @@ export function askDeleteSite(s: Pick<Site, "id" | "name">, onDone: () => void, 
       })();
     },
   });
+}
+
+/** Add the sites in a FileZilla or WinSCP export (the dropped file, or one the user picks). Resolves to a short
+    message for a toast, or "" if the user cancelled the file dialog. */
+export async function importSitesFromFile(dropped?: string): Promise<string> {
+  const file = dropped ?? (await pickFile("Import sites from FileZilla (.xml) or WinSCP (.ini)"));
+  if (!file) return "";
+  const r = await importSites(file);
+  useUiStore.getState().setSites(await fetchSites());
+  const parts = [`Imported ${r.added} site${r.added === 1 ? "" : "s"}`];
+  if (r.duplicates) parts.push(`${r.duplicates} already saved`);
+  if (r.unsupported) parts.push(`${r.unsupported} skipped (not SFTP, FTP or FTPS)`);
+  let msg = parts.join(", ");
+  if (r.added > r.passwords) msg += ". Passwords were not included for some, so enter them when you connect";
+  if (r.ppkKeys) msg += `. ${r.ppkKeys} used a PuTTY .ppk key, which warpseed cannot read: convert it to an OpenSSH key`;
+  return msg;
 }

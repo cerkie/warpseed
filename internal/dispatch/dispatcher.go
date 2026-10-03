@@ -525,7 +525,7 @@ func (d *Dispatcher) removeTransferPart(t queue.Transfer, c *sftpfast.Client, su
 		}
 		return true
 	}
-	return removePart(p)
+	return removePart(sftpfast.PartPath(t.Dst, suffix))
 }
 
 // first is the client to run one-off remote housekeeping on; nil when the
@@ -1235,8 +1235,8 @@ func (d *Dispatcher) discardPartials(t queue.Transfer, c *sftpfast.Client) bool 
 		// files and the second is the expensive one to strand.
 		gone = d.removeTransferPart(t, c, sftpfast.ChunkPartSuffix) && gone
 	} else {
-		gone = removePart(t.Dst + sftpfast.PartSuffix)
-		gone = removePart(t.Dst+sftpfast.ChunkPartSuffix) && gone
+		gone = removePart(sftpfast.PartPath(t.Dst, sftpfast.PartSuffix))
+		gone = removePart(sftpfast.PartPath(t.Dst, sftpfast.ChunkPartSuffix)) && gone
 	}
 	if !gone {
 		// A shared connection that died mid-batch, a server that refused,

@@ -41,6 +41,8 @@ export function DeleteBookmark(arg1:number):Promise<void>;
 
 export function DeleteLocal(arg1:Array<string>,arg2:string):Promise<number>;
 
+export function DeleteLocalPermanently(arg1:Array<string>,arg2:string):Promise<number>;
+
 export function DeleteRemote(arg1:number,arg2:Array<string>,arg3:string):Promise<number>;
 
 export function DeleteSite(arg1:number):Promise<void>;
@@ -51,8 +53,6 @@ export function DiskSpace(arg1:string):Promise<localfs.Space>;
 
 export function DismissUpdate(arg1:string):Promise<void>;
 
-export function DragBase():Promise<string>;
-
 export function EnqueueDownloads(arg1:number,arg2:Array<main.DownloadItem>,arg3:string):Promise<Array<number>>;
 
 export function EnqueueUploads(arg1:number,arg2:Array<main.UploadItem>,arg3:string):Promise<Array<number>>;
@@ -60,6 +60,8 @@ export function EnqueueUploads(arg1:number,arg2:Array<main.UploadItem>,arg3:stri
 export function EnqueueUploadsFromPaths(arg1:number,arg2:Array<string>,arg3:string):Promise<Array<number>>;
 
 export function GetSettings():Promise<Record<string, string>>;
+
+export function ImportSites(arg1:string):Promise<main.ImportResult>;
 
 export function ListLocal(arg1:string):Promise<localfs.Listing>;
 
@@ -116,6 +118,8 @@ export function SetSetting(arg1:string,arg2:string):Promise<void>;
 export function SetSiteRemotePath(arg1:number,arg2:string):Promise<void>;
 
 export function Sites():Promise<Array<queue.Site>>;
+
+export function StartDragOut(arg1:number,arg2:Array<main.DragOutItem>):Promise<void>;
 
 export function TransferHistory():Promise<Array<queue.HistoryEntry>>;
 

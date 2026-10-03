@@ -33,6 +33,9 @@ const (
 // sendToTrash moves a file or folder to the Recycle Bin. A volume with no bin
 // (a network share, say) is deleted outright by the shell, as Explorer does.
 func sendToTrash(path string) error {
+	if len(path) >= 260 {
+		return ErrBinTooLong
+	}
 	from, err := windows.UTF16FromString(path)
 	if err != nil {
 		return err
@@ -44,6 +47,9 @@ func sendToTrash(path string) error {
 		Flags: fofAllowUndo | fofNoConfirmation | fofNoErrorUI | fofSilent,
 	}
 	if r, _, _ := procSHFileOperation.Call(uintptr(unsafe.Pointer(&op))); r != 0 {
+		if treeHasLongPath(path) {
+			return ErrBinTooLong
+		}
 		return fmt.Errorf("recycle bin refused it (error 0x%x)", r)
 	}
 	if op.AnyOperationsAborted != 0 {

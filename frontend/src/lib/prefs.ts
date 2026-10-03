@@ -15,6 +15,7 @@ export type PrefKey =
   | "ui.pane_widths"
   | "ui.pane_hidden"
   | "ui.notify"
+  | "ui.speed_mode"
   | "ui.remote_side"
   | "ui.tree_width"
   | "ui.recents";
@@ -29,6 +30,7 @@ const ALL: PrefKey[] = [
   "ui.pane_widths",
   "ui.pane_hidden",
   "ui.notify",
+  "ui.speed_mode",
   "ui.remote_side",
   "ui.tree_width",
   "ui.recents",
@@ -47,6 +49,7 @@ const LEGACY: Record<PrefKey, string> = {
   "ui.pane_widths": "",
   "ui.pane_hidden": "",
   "ui.notify": "",
+  "ui.speed_mode": "",
   "ui.remote_side": "",
   "ui.tree_width": "",
   "ui.recents": "ws-recent-paths",

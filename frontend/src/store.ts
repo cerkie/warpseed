@@ -22,7 +22,9 @@ import type { PromptSpec } from "./components/PromptDialog";
 interface ProgressSample {
   bytes: number;
   at: number; // ms timestamp of last sample
-  rate: number; // EMA bytes/sec
+  rate: number; // bytes/sec: smoothed live speed, or the average (ui.speed_mode)
+  t0?: number; // start of the average window
+  b0?: number; // bytes at the start of it
   chunks?: number[]; // per-connection completion fractions
 }
 
@@ -192,12 +194,24 @@ export const useUiStore = create<UiState>((set) => ({
       const now = performance.now();
       const prev = s.progress[id];
       let rate = prev?.rate ?? 0;
+      // The average counts from the first sample, or from the first one after
+      // a pause (a gap of several seconds), so a paused transfer does not
+      // drag its own average down.
+      let t0 = prev?.t0 ?? now;
+      let b0 = prev?.b0 ?? bytes;
+      if (prev && now - prev.at > 5000) {
+        t0 = now;
+        b0 = bytes;
+      }
       if (prev && now > prev.at) {
         const inst = ((bytes - prev.bytes) * 1000) / (now - prev.at);
         rate = prev.rate === 0 ? inst : prev.rate * 0.7 + inst * 0.3; // EMA smoothing
+        if (getPref("ui.speed_mode") === "average" && now - t0 > 2000) {
+          rate = ((bytes - b0) * 1000) / (now - t0);
+        }
       }
       return {
-        progress: { ...s.progress, [id]: { bytes, at: now, rate, chunks: chunks ?? prev?.chunks } },
+        progress: { ...s.progress, [id]: { bytes, at: now, rate, t0, b0, chunks: chunks ?? prev?.chunks } },
       };
     }),
   patchTransferState: (id, state, error) => {

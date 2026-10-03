@@ -212,6 +212,46 @@ export namespace main {
 	        this.move = source["move"];
 	    }
 	}
+	export class DragOutItem {
+	    path: string;
+	    name: string;
+	    size: number;
+	    modTime: string;
+	    isDir: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DragOutItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.modTime = source["modTime"];
+	        this.isDir = source["isDir"];
+	    }
+	}
+	export class ImportResult {
+	    added: number;
+	    duplicates: number;
+	    unsupported: number;
+	    passwords: number;
+	    ppkKeys: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.added = source["added"];
+	        this.duplicates = source["duplicates"];
+	        this.unsupported = source["unsupported"];
+	        this.passwords = source["passwords"];
+	        this.ppkKeys = source["ppkKeys"];
+	    }
+	}
 	export class UpdateInfo {
 	    current: string;
 	    latest: string;

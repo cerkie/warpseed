@@ -386,7 +386,7 @@ func (f *ftpConn) download(ctx context.Context, remotePath, localPath string, on
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return fmt.Errorf("create local dir: %w", err)
 	}
-	part := localPath + PartSuffix
+	part := PartPath(localPath, PartSuffix)
 	lf, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return fmt.Errorf("open part file: %w", err)

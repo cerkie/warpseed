@@ -7,6 +7,8 @@ import {
 } from "../ipc";
 import { friendlyError } from "../lib/errors";
 import { askDeleteSite } from "../lib/sites";
+import { toast } from "../lib/toast";
+import ImportHint from "./ImportHint";
 import { useUiStore } from "../store";
 import { Close, Pencil } from "./Icon";
 import ProtocolField from "./ProtocolField";
@@ -170,6 +172,7 @@ export default function QuickConnect() {
         </div>
 
         {error && <div className="form-error">{error}</div>}
+        <ImportHint onMessage={(m, bad) => toast(bad ? "error" : "success", m)} />
 
         <div className="dialog__actions">
           <button className="btn" onClick={close}>

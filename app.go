@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -50,9 +49,6 @@ type App struct {
 
 	mu       sync.Mutex
 	sessions map[int64]*sftpfast.Client // browse connection per connected site
-
-	dragBase string       // URL prefix of the drag-out file server
-	dragSrv  *http.Server
 
 	notifyOnce sync.Once
 	notifyErr  error
@@ -163,7 +159,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	go a.dispatcher.Run(ctx)
 	a.startUpdateCheck()
-	a.startDragServer()
+	_ = os.RemoveAll(dragTempRoot())
 }
 
 // dialTransfers opens n dedicated data connections for one transfer.
@@ -220,9 +216,7 @@ func (a *App) shutdown(_ context.Context) {
 	if a.dispatcher != nil {
 		a.dispatcher.Stop(shutdownGrace)
 	}
-	if a.dragSrv != nil {
-		_ = a.dragSrv.Close()
-	}
+	_ = os.RemoveAll(dragTempRoot())
 	a.mu.Lock()
 	for id, c := range a.sessions {
 		c.Close()
@@ -259,6 +253,25 @@ func configDir() (string, error) {
 
 var errNoStore = errors.New("queue database unavailable")
 
+// shortenedNames counts local names fitName had to shorten since it was last
+// reported, so one notice covers a whole batch.
+var shortenedNames atomic.Int64
+
+func fitLocal(name string) string {
+	short, changed := fitName(name)
+	if changed {
+		shortenedNames.Add(1)
+	}
+	return short
+}
+
+// reportShortened tells the user, once, about names shortened since the last call.
+func (a *App) reportShortened() {
+	if n := shortenedNames.Swap(0); n > 0 {
+		a.sink.Emit("app:info", fmt.Sprintf("%d name(s) were longer than Windows allows (255 characters) and were shortened; extensions are kept", n))
+	}
+}
+
 // safeLocalName reduces a server-supplied name to a single local path
 // element. Remote names are attacker-controlled: a POSIX filename may legally
 // contain '\' or "..", both of which Windows treats as path syntax, so
@@ -270,7 +283,7 @@ func safeLocalName(remote string) (string, error) {
 	if name == "" || name == "." || name == ".." || !filepath.IsLocal(name) {
 		return "", fmt.Errorf("refusing unsafe remote file name %q", remote)
 	}
-	return name, nil
+	return fitLocal(name), nil
 }
 
 // safeLocalJoin places a remote-relative path under root, refusing anything
@@ -280,7 +293,11 @@ func safeLocalJoin(root, relative string) (string, error) {
 	if rel == "" || !filepath.IsLocal(rel) {
 		return "", fmt.Errorf("refusing unsafe remote path %q", relative)
 	}
-	return filepath.Join(root, rel), nil
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, p := range parts {
+		parts[i] = fitLocal(p)
+	}
+	return filepath.Join(root, filepath.Join(parts...)), nil
 }
 
 // --- Local filesystem bindings ---
@@ -622,8 +639,27 @@ func (a *App) RemoteHome(id int64) (string, error) {
 // fs:changed so any pane showing that directory updates itself.
 
 // DeleteLocal sends local files/folders to the Recycle Bin (recursive for folders).
+// A path the Recycle Bin cannot hold comes back as "TOO_LONG_FOR_RECYCLE_BIN",
+// which the UI turns into an offer to delete permanently.
 func (a *App) DeleteLocal(paths []string, dir string) (int, error) {
 	n, err := localfs.Trash(paths)
+	a.emitFsChanged("local", 0, dir)
+	if errors.Is(err, localfs.ErrBinTooLong) {
+		return n, errors.New("TOO_LONG_FOR_RECYCLE_BIN")
+	}
+	return n, err
+}
+
+// DeleteLocalPermanently deletes local files/folders for good. Entries that are
+// already gone (trashed before the Recycle Bin refused one) are skipped.
+func (a *App) DeleteLocalPermanently(paths []string, dir string) (int, error) {
+	var left []string
+	for _, p := range paths {
+		if _, err := os.Lstat(p); err == nil {
+			left = append(left, p)
+		}
+	}
+	n, err := localfs.Delete(left)
 	a.emitFsChanged("local", 0, dir)
 	return n, err
 }
@@ -999,6 +1035,12 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 	// Validate preconditions before enqueuing anything so the call is
 	// all-or-nothing (a partial failure would queue files while reporting
 	// total failure to the UI).
+	for _, it := range items {
+		if it.Move {
+			// Moving deletes the original, which is never offered for server files.
+			return nil, errors.New("files on a server are copied, never moved; download a copy instead")
+		}
+	}
 	var dirs, files []DownloadItem
 	for _, it := range items {
 		if it.IsDir {
@@ -1025,10 +1067,10 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 			return ids, err
 		}
 		id, err := a.enqueueWithPolicy(queue.Transfer{
-			SiteID: siteID,
-			Src:    it.Src,
-			Dst:    filepath.Join(localDir, name),
-			Size:   it.Size,
+			SiteID:   siteID,
+			Src:      it.Src,
+			Dst:      filepath.Join(localDir, name),
+			Size:     it.Size,
 			MoveRoot: moveRoot(it.Move, it.Src),
 		}, queue.FileFacts{Size: it.Size, Mtime: unixFromRFC3339(it.ModTime)}, nil)
 		if err != nil {
@@ -1040,6 +1082,7 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 		}
 		ids = append(ids, id)
 	}
+	a.reportShortened()
 
 	if len(dirs) > 0 {
 		go a.expandRemoteDirs(client, siteID, dirs, localDir)
@@ -1102,6 +1145,7 @@ func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []Dow
 		msg += fmt.Sprintf(" · %d skipped (overwrite rules, or an unsafe name)", skipped)
 	}
 	a.sink.Emit("app:info", msg)
+	a.reportShortened()
 	a.sink.Emit("queue:changed", nil)
 	a.dispatcher.Wake()
 }
@@ -1449,8 +1493,8 @@ func (a *App) removeParts(t queue.Transfer, going []int64) bool {
 	}
 	ok := true
 	for _, s := range suffixes {
-		if rerr := os.Remove(t.Dst + s); rerr != nil && !os.IsNotExist(rerr) {
-			log.Printf("clear failed: remove %s: %v", t.Dst+s, rerr)
+		if rerr := os.Remove(sftpfast.PartPath(t.Dst, s)); rerr != nil && !os.IsNotExist(rerr) {
+			log.Printf("clear failed: remove %s: %v", sftpfast.PartPath(t.Dst, s), rerr)
 			ok = false
 		}
 	}
@@ -1797,15 +1841,15 @@ var settingValidators = map[string]func(string) error{
 	"bw.limit_bytes":       intRange(0, 1<<40),
 	"bw.percent":           intRange(10, 95),
 	"bw.mode":              oneOf("off", "fixed", "percent"),
-	"bw.sched_on":          oneOf("0", "1"),            // slow down during set hours
-	"bw.sched_from":        intRange(0, 23),            // first hour of the window
-	"bw.sched_to":          intRange(0, 23),            // hour it ends (exclusive)
-	"bw.sched_limit_bytes": intRange(1, 1<<40),         // limit inside the window
+	"bw.sched_on":          oneOf("0", "1"),    // slow down during set hours
+	"bw.sched_from":        intRange(0, 23),    // first hour of the window
+	"bw.sched_to":          intRange(0, 23),    // hour it ends (exclusive)
+	"bw.sched_limit_bytes": intRange(1, 1<<40), // limit inside the window
 	// Default on. A version check sends no identifiers and no usage data, and
 	// the people it exists for — users stranded on 1.0.0 without the NTFS or
 	// data-safety fixes — are exactly the ones who would never find an
 	// off-by-default switch.
-	"updates.check": oneOf("0", "1"),
+	"updates.check":  oneOf("0", "1"),
 	"updates.source": oneOf("fork", "upstream"),
 	// Unlisted keys are hard-rejected, so this line is mandatory for the
 	// setting to be writable at all.
@@ -1824,13 +1868,14 @@ var settingValidators = map[string]func(string) error{
 	"ui.pane_columns":  jsonBlob,
 	"ui.pane_sort":     jsonBlob,
 	"ui.tree_width":    jsonBlob,
-	"ui.pane_split":    intRange(20, 80), // left pane width, percent
-	"ui.pane_state":    jsonBlob,         // each pane's source and folder
-	"ui.pane_hidden":   jsonBlob,         // file-list columns the user hid
-	"ui.notify":        oneOf("0", "1"),  // desktop notification when the queue finishes
-	"ui.remote_side":   oneOf("0", "1", "2"),   // the pane server connections open in
-	"ui.pane_count":    oneOf("2", "3"),     // how many file panes are shown
-	"ui.pane_widths":   jsonBlob,            // pane widths in percent, per pane count
+	"ui.pane_split":    intRange(20, 80),     // left pane width, percent
+	"ui.pane_state":    jsonBlob,             // each pane's source and folder
+	"ui.pane_hidden":   jsonBlob,             // file-list columns the user hid
+	"ui.notify":        oneOf("0", "1"),      // desktop notification when the queue finishes
+	"ui.speed_mode":    oneOf("live", "average"), // how transfer speeds are shown
+	"ui.remote_side":   oneOf("0", "1", "2"), // the pane server connections open in
+	"ui.pane_count":    oneOf("2", "3"),      // how many file panes are shown
+	"ui.pane_widths":   jsonBlob,             // pane widths in percent, per pane count
 	"ui.recents":       jsonBlob,
 	// One-time flags ("1" once shown) — e.g. the post-first-transfer
 	// support-the-project toast must never repeat.
@@ -2015,7 +2060,6 @@ func (a *App) dialAll(ctx context.Context, siteID int64, site queue.Site, passwo
 	}
 	return clients, nil
 }
-
 
 // moveRoot is the queue's marker for a move: the item to delete after it lands.
 func moveRoot(move bool, src string) string {

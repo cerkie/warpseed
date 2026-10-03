@@ -191,7 +191,7 @@ func DownloadChunks(
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return fmt.Errorf("create local dir: %w", err)
 	}
-	part := localPath + ChunkPartSuffix
+	part := PartPath(localPath, ChunkPartSuffix)
 
 	// Resume safety: a recorded offset is only trustworthy if the file those
 	// bytes were written to is still here, still the right size. Otherwise

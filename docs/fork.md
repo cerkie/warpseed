@@ -21,7 +21,7 @@ each change lives in the code.
 | Hyperlane for FTPS downloads (REST-offset ranges); FTPS uploads stay single-connection | `ftps.go` (`ftpReader`), `chunked.go` (`openReaderAt`), `internal/dispatch` (`streamsFor`) |
 | Parallel connection setup; quick SIZE/MDTM stat on FTPS | `app.go` (`dialAll`), `ftps.go` (`statLocked`, `sizeLocked`) |
 | Resume verifies the last 64 KiB on SFTP and FTPS | `download.go` (`tailMatches`), `upload.go`, `ftps.go` |
-| Moves: Shift-drag, F6; copy-then-delete across kinds, rename within one | `FilePane.tsx`, `app.go` (`MoveRemote`, `moveRoot`), `internal/dispatch` (`removeMovedSource`), migration 014 (`move_root`) |
+| Moves: Shift-drag, F6; PC-to-server is copy-then-delete (server-to-PC is copy only), rename within one place | `FilePane.tsx`, `app.go` (`MoveRemote`, `moveRoot`), `internal/dispatch` (`removeMovedSource`), migration 014 (`move_root`) |
 | SSH key file and SSH agent login | `client.go` (`authMethods`), `agent_windows.go`, `agent_other.go`, `ProtocolField.tsx` |
 | Per-site options (`implicit`, `keyPath`, `useAgent`, `autoConnect`) in `options_json` | `app.go` (`siteOptions`), `frontend/src/lib/protocol.ts` |
 | Connect on launch; remembered server pane; pane folders and divider restored | `App.tsx`, `lib/prefs.ts`, `ui.pane_state`, `ui.remote_side`, `ui.pane_split` |
@@ -36,7 +36,8 @@ each change lives in the code.
 | Plain FTP | `ftps.go` (`FTPSConfig.Plain`), `app.go` (`dialSite`), `lib/protocol.ts` |
 | Third pane, per-count pane widths, transfer target = last-used other pane | `store.ts` (`paneCount`, `otherSide`), `PaneArea.tsx` |
 | Drag in from Explorer | `main.go` (`EnableFileDrop`), `lib/fileDrop.ts`, `app.go`/`dragout.go` (`EnqueueUploadsFromPaths`) |
-| Drag a single file out to Explorer | `dragout.go` (loopback file server), `lib/dragOut.ts`, `FilePane.tsx` (`DownloadURL`) |
+| Drag files and folders out to Explorer and other file managers | `dragout_windows.go` (native OLE drag), `dragout_watch_windows.go` (finds the drop folder), `lib/dragOut.ts`, `FilePane.tsx` (`armDragOut`) |
+| Import sites from FileZilla / WinSCP | `siteimport.go`, `lib/sites.ts`, `QuickConnect.tsx`, `SettingsDialog.tsx` |
 | Installer build | `wails build -nsis` (needs NSIS) |
 
 ## Settings that need allow-listing

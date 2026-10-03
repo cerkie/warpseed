@@ -325,11 +325,14 @@ const App = {
   async UpdateRepo() {
     return "cerkie/warpseed";
   },
-  async DragBase() {
-    return "";
+  async StartDragOut() {
+    return;
   },
   async EnqueueUploadsFromPaths(siteId: number, paths: string[], remoteDir: string) {
     return this.EnqueueUploads(siteId, paths.map((p) => ({ src: p, size: 0, isDir: false })), remoteDir);
+  },
+  async ImportSites() {
+    return { added: 3, duplicates: 1, unsupported: 0, passwords: 2, ppkKeys: 0 };
   },
   async PickFile() {
     return "C:\Users\you\.ssh\id_ed25519";

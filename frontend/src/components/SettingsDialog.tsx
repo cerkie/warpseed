@@ -21,6 +21,7 @@ import { applyTheme, coerceTheme, THEMES, type ThemePref } from "../lib/theme";
 import { DEFAULT_FORM, DEFAULT_PORT, formFields, formOf, secretLabel, type SiteForm } from "../lib/protocol";
 import ProtocolField from "./ProtocolField";
 import { askDeleteSite } from "../lib/sites";
+import ImportHint from "./ImportHint";
 import Switch from "./Switch";
 import { friendlyError } from "../lib/errors";
 import { setPref } from "../lib/prefs";
@@ -134,6 +135,7 @@ export default function SettingsDialog() {
   // Legacy stored ids (v3 themes, "dark"/"light", "system") coerce to v4.
   const theme: ThemePref = coerceTheme(cfg["ui.theme"] ?? null);
   const bwMode = cfg["bw.mode"] || "off";
+  const speedMode = cfg["ui.speed_mode"] || "live";
   const closeAction = cfg["ui.close_action"] || "ask";
   const startPaused = cfg["queue.start_paused"] === "1";
 
@@ -299,13 +301,12 @@ export default function SettingsDialog() {
         <section className="set-section" data-tab="transfers">
           <h3>Transfers</h3>
           <p className="set-note set-blurb">
-            These are connection budgets, not file counts. A Hyperlane file spends one
-            connection per lane, so 8 connections runs two 4-lane files at once — and a
-            budget below the lane count narrows Hyperlane instead of queueing. Files wait
-            for their full lane count rather than starting on a spare connection.
+            How many connections warpseed may open at once. A Hyperlane file uses one
+            connection per lane, so 8 connections run two 4-lane files at a time. If the
+            limit is lower than the lane count, the file uses fewer lanes.
           </p>
           <div className="set-row">
-            <label>Connections, all sites</label>
+            <label title="The most connections open at once, across every site">Connections, all sites</label>
             <input
               type="number"
               min={1}
@@ -315,7 +316,7 @@ export default function SettingsDialog() {
             />
           </div>
           <div className="set-row">
-            <label>Connections per site</label>
+            <label title="The most connections open at once to a single site">Connections per site</label>
             <input
               type="number"
               min={1}
@@ -325,18 +326,17 @@ export default function SettingsDialog() {
             />
           </div>
           <p className="set-note">
-            Per-site is the default; a site can override it in its own settings. Keep it at
-            or below what your server allows — refused connections show up in the log.
+            A site can override this in its own settings. Keep it at or below what your
+            server allows; refused connections show up in the log.
           </p>
         </section>
 
         <section className="set-section" data-tab="transfers">
           <h3>When the file already exists</h3>
           <p className="set-note set-blurb">
-            Checked before the transfer starts, not after it. &ldquo;Ask&rdquo; holds the
-            file in the queue with the sizes and dates side by side, so a folder full of
-            clashes is one decision rather than a dialog per file. Applies to uploads and
-            downloads alike &mdash; &ldquo;incoming&rdquo; is whichever file is being sent.
+            Checked before a transfer starts. &ldquo;Ask&rdquo; holds the file in the queue
+            and shows both versions side by side. &ldquo;Incoming&rdquo; means the file
+            being sent, for uploads and downloads alike.
           </p>
           {CONFLICT_RULES.map((r) => (
             <div className="set-row" key={r.key}>
@@ -361,12 +361,12 @@ export default function SettingsDialog() {
         <section className="set-section" data-tab="transfers">
           <h3>Hyperlane · Downloads</h3>
           <p className="set-note set-blurb">
-            Splits one large file across several connections at once, so a server that
-            caps the speed of each connection no longer caps the file. Each direction
-            is tuned separately — a link is rarely as fast up as it is down.
+            Splits a large file across several connections, so a server that limits each
+            connection can&rsquo;t limit the whole file. Downloads and uploads are set
+            separately.
           </p>
           <div className="set-row">
-            <label>Lanes per file</label>
+            <label title="How many connections one large file is split across">Lanes per file</label>
             <span className="set-inline">
               <input
                 type="number"
@@ -380,7 +380,7 @@ export default function SettingsDialog() {
           </div>
           {laneNote("transfers.chunk_streams", 4)}
           <div className="set-row">
-            <label>Engage above</label>
+            <label title="Files smaller than this use a single connection">Engage above</label>
             <span className="set-inline">
               <input
                 type="number"
@@ -396,7 +396,7 @@ export default function SettingsDialog() {
         <section className="set-section" data-tab="transfers">
           <h3>Hyperlane · Uploads</h3>
           <div className="set-row">
-            <label>Lanes per file</label>
+            <label title="How many connections one large file is split across">Lanes per file</label>
             <span className="set-inline">
               <input
                 type="number"
@@ -410,7 +410,7 @@ export default function SettingsDialog() {
           </div>
           {laneNote("transfers.upload_chunk_streams", 3)}
           <div className="set-row">
-            <label>Engage above</label>
+            <label title="Files smaller than this use a single connection">Engage above</label>
             <span className="set-inline">
               <input
                 type="number"
@@ -422,8 +422,8 @@ export default function SettingsDialog() {
             </span>
           </div>
           <p className="set-note">
-            Upload speed usually caps out around 3 lanes — more connections cost
-            handshakes without adding throughput.
+            Upload speed usually peaks around 3 lanes; more connections add overhead
+            without adding speed.
           </p>
         </section>
 
@@ -451,12 +451,10 @@ export default function SettingsDialog() {
             ))}
           </div>
           <p className="set-note">
-            Unfinished transfers are kept and pick up the next time you open
-            warpseed (or wait, if the queue starts paused &mdash; see below).
-            Choosing &ldquo;Close&rdquo; skips the confirmation; choosing
-            &ldquo;Minimize to pill&rdquo; shrinks the window instead of closing
-            it. With nothing transferring, warpseed closes straight away
-            whichever you pick.
+            Unfinished transfers are kept and resume the next time you open warpseed
+            (or wait, if the queue starts paused). &ldquo;Close&rdquo; skips the
+            confirmation. &ldquo;Minimize to pill&rdquo; shrinks the window instead of
+            closing it. With nothing transferring, warpseed always closes straight away.
           </p>
         </section>
 
@@ -479,10 +477,9 @@ export default function SettingsDialog() {
             ))}
           </div>
           <p className="set-note">
-            &ldquo;Start paused&rdquo; opens warpseed with the queue stopped:
-            everything you queued is still there, but nothing moves until you
-            press <strong>Resume queue</strong> in the dock. Pausing the queue
-            from the dock is also remembered across a restart.
+            &ldquo;Start paused&rdquo; opens warpseed with the queue stopped. Everything is
+            still there, but nothing moves until you press <strong>Resume queue</strong>{" "}
+            in the dock. Pausing from the dock is also remembered.
           </p>
         </section>
 
@@ -503,37 +500,43 @@ export default function SettingsDialog() {
 
         <section className="set-section" data-tab="transfers">
           <h3>Bandwidth</h3>
-          <div className="segmented" role="radiogroup" aria-label="Bandwidth limit mode">
-            {[
-              ["off", "Off"],
-              ["fixed", "Fixed"],
-              ["percent", "% of max"],
-            ].map(([v, label]) => (
-              <button
-                key={v}
-                className={bwMode === v ? "seg--on" : ""}
-                role="radio"
-                aria-checked={bwMode === v}
-                onClick={() => put("bw.mode", v)}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="set-row">
+            <label title="Cap the combined speed of all transfers">Speed limit</label>
+            <div className="segmented segmented--row" role="radiogroup" aria-label="Bandwidth limit mode">
+              {[
+                ["off", "Off"],
+                ["fixed", "Fixed"],
+                ["percent", "% of max"],
+              ].map(([v, label]) => (
+                <button
+                  key={v}
+                  className={bwMode === v ? "seg--on" : ""}
+                  role="radio"
+                  aria-checked={bwMode === v}
+                  onClick={() => put("bw.mode", v)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           {bwMode === "fixed" && (
             <div className="set-row">
-              <label>Limit (MiB/s)</label>
-              <input
-                type="number"
-                min={1}
-                value={
-                  Number(cfg["bw.limit_bytes"] || 0) > 0
-                    ? Math.round(Number(cfg["bw.limit_bytes"]) / MIB)
-                    : ""
-                }
-                placeholder="no limit"
-                onChange={(e) => put("bw.limit_bytes", String(Number(e.target.value) * MIB))}
-              />
+              <label>Limit</label>
+              <span className="set-inline">
+                <input
+                  type="number"
+                  min={1}
+                  value={
+                    Number(cfg["bw.limit_bytes"] || 0) > 0
+                      ? Math.round(Number(cfg["bw.limit_bytes"]) / MIB)
+                      : ""
+                  }
+                  placeholder="none"
+                  onChange={(e) => put("bw.limit_bytes", String(Number(e.target.value) * MIB))}
+                />
+                <span className="set-note">MiB/s</span>
+              </span>
             </div>
           )}
           {bwMode === "percent" && (
@@ -548,42 +551,49 @@ export default function SettingsDialog() {
                   onChange={(e) => put("bw.percent", e.target.value)}
                 />
                 <span className="set-note">
-                  % of measured max
+                  % of the fastest speed seen
                   {observedMax > 0 ? ` (${formatSize(observedMax)}/s so far)` : " (measuring…)"}
                 </span>
               </span>
             </div>
           )}
-          <label className="set-check">
-            <input
-              type="checkbox"
+          <div className="set-row">
+            <label title="Use a lower limit during chosen hours, for example while you work">
+              Slow down at set hours
+            </label>
+            <Switch
               checked={cfg["bw.sched_on"] === "1"}
-              onChange={(e) => put("bw.sched_on", e.target.checked ? "1" : "0")}
-            />
-            Slow down during set hours
-          </label>
+              onChange={(on) => put("bw.sched_on", on ? "1" : "0")}
+            >
+              {cfg["bw.sched_on"] === "1" ? "On" : "Off"}
+            </Switch>
+          </div>
           {cfg["bw.sched_on"] === "1" && (
             <div className="set-row">
+              <label>Between</label>
               <span className="set-inline">
                 <input
                   type="number"
                   min={0}
                   max={23}
+                  aria-label="From hour"
                   value={cfg["bw.sched_from"] ?? "9"}
                   onChange={(e) => put("bw.sched_from", e.target.value)}
                 />
-                <span className="set-note">to</span>
+                <span className="set-note">and</span>
                 <input
                   type="number"
                   min={0}
                   max={23}
+                  aria-label="To hour"
                   value={cfg["bw.sched_to"] ?? "17"}
                   onChange={(e) => put("bw.sched_to", e.target.value)}
                 />
-                <span className="set-note">o'clock, at most</span>
+                <span className="set-note">o&rsquo;clock, limit to</span>
                 <input
                   type="number"
                   min={1}
+                  aria-label="Limit during those hours"
                   value={
                     Number(cfg["bw.sched_limit_bytes"] || 0) > 0
                       ? Math.round(Number(cfg["bw.sched_limit_bytes"]) / MIB)
@@ -596,6 +606,31 @@ export default function SettingsDialog() {
               </span>
             </div>
           )}
+          <p className="set-note">The schedule can only lower a limit you already set, never raise it.</p>
+          <div className="set-row">
+            <label title="Live follows the current speed. Average smooths it over each transfer, so the number stops jumping around.">
+              Speed readout
+            </label>
+            <div className="segmented segmented--row" role="radiogroup" aria-label="How speeds are shown">
+              {[
+                ["live", "Live"],
+                ["average", "Average"],
+              ].map(([v, label]) => (
+                <button
+                  key={v}
+                  className={speedMode === v ? "seg--on" : ""}
+                  role="radio"
+                  aria-checked={speedMode === v}
+                  onClick={() => {
+                    put("ui.speed_mode", v);
+                    setPref("ui.speed_mode", v);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="set-section" data-tab="sites">
@@ -629,6 +664,7 @@ export default function SettingsDialog() {
             <button className="btn" style={{ marginTop: "var(--sp-2)" }} onClick={() => setDraft(blankDraft())}>
               Add site
             </button>
+            <ImportHint onMessage={(m) => setSiteMsg(m)} />
             </>
           ) : (
             <>

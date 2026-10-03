@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
+	"unicode/utf16"
 )
 
 // PartSuffix marks in-flight downloads. Renamed away only after a clean
@@ -39,16 +41,20 @@ func (c *Client) Download(ctx context.Context, remotePath, localPath string, onS
 	}
 	defer rf.Close()
 
+	// Some servers refuse an fstat on an open handle (permission denied) while
+	// allowing the same stat by path, which is what the chunked path uses.
 	rstat, err := rf.Stat()
 	if err != nil {
-		return fmt.Errorf("stat remote %q: %w", remotePath, err)
+		if rstat, err = c.sftp.Stat(remotePath); err != nil {
+			return fmt.Errorf("stat remote %q: %w", remotePath, err)
+		}
 	}
 	remoteSize := rstat.Size()
 
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return fmt.Errorf("create local dir: %w", err)
 	}
-	part := localPath + PartSuffix
+	part := PartPath(localPath, PartSuffix)
 	lf, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return fmt.Errorf("open part file: %w", err)
@@ -170,4 +176,32 @@ func (c *Client) remoteTailMatches(part string, lf io.ReaderAt, offset int64) (b
 	}
 	defer rr.Close()
 	return tailMatches(rr, lf, offset)
+}
+
+// PartPath is the in-progress file for a local download. It is localPath plus
+// the suffix, except for a name so close to Windows' 255-character limit that
+// the suffix would not fit; that one gets a shortened stand-in in the same
+// folder. The stand-in is the same every time, so a resume finds it, and the
+// finished file keeps its real name.
+func PartPath(localPath, suffix string) string {
+	const maxUnits = 255
+	dir, base := filepath.Split(localPath)
+	units := func(s string) int { return len(utf16.Encode([]rune(s))) }
+	if units(base)+units(suffix) <= maxUnits {
+		return localPath + suffix
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(base))
+	tail := fmt.Sprintf("~%08x%s", h.Sum32(), suffix)
+	budget := maxUnits - units(tail)
+	var head []rune
+	for _, r := range base {
+		n := units(string(r))
+		if budget < n {
+			break
+		}
+		budget -= n
+		head = append(head, r)
+	}
+	return dir + string(head) + tail
 }

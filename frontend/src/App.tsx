@@ -340,7 +340,9 @@ export default function App() {
       <header className="app__header">
         <span className="app__mark">
           <Slipstream size={18} className="app__glyph" />
-          warp<span className="app__mark-accent">seed</span>
+          <span>
+            warp<span className="app__mark-accent">seed</span>
+          </span>
         </span>
         <span className="app__spacer" />
         <div className="viewseg" aria-label="View mode">
@@ -365,16 +367,16 @@ export default function App() {
           >
             Activity
           </button>
-          {flightAvailable && (
-            <button
-              className={`viewseg__btn${viewMode === "flight" ? " viewseg__btn--active" : ""}`}
-              aria-pressed={viewMode === "flight"}
-              onClick={() => setViewMode("flight")}
-            >
-              Flight
-              {anyActive && <span className="viewseg__dot" aria-hidden="true" />}
+          <button
+            className={`viewseg__btn${viewMode === "flight" ? " viewseg__btn--active" : ""}`}
+            aria-pressed={viewMode === "flight"}
+            disabled={!flightAvailable}
+            title={flightAvailable ? undefined : "Flight shows your live connections while something is transferring"}
+            onClick={() => setViewMode("flight")}
+          >
+            Flight
+            {anyActive && <span className="viewseg__dot" aria-hidden="true" />}
             </button>
-          )}
         </div>
         <button
           className="omnibar"
@@ -468,9 +470,11 @@ export default function App() {
         >
           <Heart size={13} />
         </button>
-        <span className={`statusbar__db${dbVersion > 0 ? "" : " status--warn"}`}>
-          {dbVersion > 0 ? `db v${dbVersion}` : "db unavailable"}
-        </span>
+        {dbVersion <= 0 && (
+          <span className="statusbar__db status--warn" title="The queue database could not be opened, so transfers will not be remembered">
+            Queue database unavailable
+          </span>
+        )}
       </footer>
 
       <CommandPalette />

@@ -17,8 +17,8 @@
 
   --text: #2a2620;
   --text-mid: #5a5449;
-  --text-dim: #8a8177;
-  --text-faint: #b3aa9e;
+  --text-dim: #635c53;
+  --text-faint: #6d675e;
 
   --accent: #c65a33;
   --accent-dim: #d07c5b;
@@ -35,8 +35,8 @@
   --border: #e6dccd;
   --border-strong: #c9bda9;
   --scrim: rgb(42 38 32 / 0.35);
-  --shadow-1: 0 4px 16px rgb(42 38 32 / 0.08), 0 1px 3px rgb(42 38 32 / 0.06);
-  --shadow-2: 0 12px 32px rgb(42 38 32 / 0.14), 0 2px 6px rgb(42 38 32 / 0.08);
+  --shadow-1: 0 1px 3px rgb(42 38 32 / 0.1), 0 2px 8px rgb(42 38 32 / 0.06);
+  --shadow-2: 0 2px 6px rgb(42 38 32 / 0.12), 0 8px 20px rgb(42 38 32 / 0.1);
 }
 
 /* COBALT — cool off-white ground, pure white cards, electric blue accent. */
@@ -52,8 +52,8 @@
 
   --text: #14161c;
   --text-mid: #464b55;
-  --text-dim: #7c828e;
-  --text-faint: #a9adb6;
+  --text-dim: #585c66;
+  --text-faint: #64686f;
 
   --accent: #2242ff;
   --accent-dim: #5f77ff;
@@ -70,8 +70,8 @@
   --border: #e2dfd8;
   --border-strong: #c0bdb4;
   --scrim: rgb(20 22 28 / 0.35);
-  --shadow-1: 0 4px 16px rgb(20 22 28 / 0.08), 0 1px 3px rgb(20 22 28 / 0.06);
-  --shadow-2: 0 12px 32px rgb(20 22 28 / 0.14), 0 2px 6px rgb(20 22 28 / 0.08);
+  --shadow-1: 0 1px 3px rgb(20 22 28 / 0.1), 0 2px 8px rgb(20 22 28 / 0.06);
+  --shadow-2: 0 2px 6px rgb(20 22 28 / 0.12), 0 8px 20px rgb(20 22 28 / 0.1);
 }
 
 /* IRIS — the dark one. Deep violet-black ground, indigo surfaces,
@@ -89,7 +89,7 @@
   --text: #ece9ff;
   --text-mid: #c4bde4;
   --text-dim: #9a92c4;
-  --text-faint: #6b6494;
+  --text-faint: #8b85af;
 
   --accent: #8b7bff;
   --accent-dim: #6f61d1;
@@ -106,8 +106,8 @@
   --border: #272052;
   --border-strong: #3b3275;
   --scrim: rgb(6 4 18 / 0.6);
-  --shadow-1: 0 8px 24px rgb(4 2 16 / 0.5);
-  --shadow-2: 0 16px 48px rgb(4 2 16 / 0.55);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.45), 0 3px 8px rgb(0 0 0 / 0.25), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-2: 0 2px 4px rgb(0 0 0 / 0.4), 0 8px 20px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
 :root:not([data-theme]),
@@ -123,8 +123,8 @@
 
   --text: #e9eaec;
   --text-mid: #bfc1c6;
-  --text-dim: #93969c;
-  --text-faint: #686b72;
+  --text-dim: #9a9da3;
+  --text-faint: #8d9095;
 
   --accent: #34d1bf;
   --accent-dim: #28a99b;
@@ -141,8 +141,8 @@
   --border: #26272b;
   --border-strong: #3a3b40;
   --scrim: rgb(0 0 0 / 0.62);
-  --shadow-1: 0 8px 24px rgb(0 0 0 / 0.55);
-  --shadow-2: 0 16px 48px rgb(0 0 0 / 0.6);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.45), 0 3px 8px rgb(0 0 0 / 0.25), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-2: 0 2px 4px rgb(0 0 0 / 0.4), 0 8px 20px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
 /* ── tokens shared by every theme ─────────────────────────────────── */

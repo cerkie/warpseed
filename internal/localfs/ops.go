@@ -1,6 +1,7 @@
 package localfs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,4 +109,23 @@ func Mkdir(parent, name string) error {
 		return fmt.Errorf("create folder %q: %w", name, err)
 	}
 	return nil
+}
+
+// ErrBinTooLong is returned by Trash for a path the Recycle Bin cannot hold
+// (Windows' shell stops at 260 characters). Nothing was deleted; the caller
+// can offer a permanent delete.
+var ErrBinTooLong = errors.New("too long for the Recycle Bin")
+
+// treeHasLongPath reports whether path, or anything inside it, is 260
+// characters or longer.
+func treeHasLongPath(path string) bool {
+	long := false
+	_ = filepath.WalkDir(path, func(p string, _ os.DirEntry, err error) error {
+		if err == nil && len(p) >= 260 {
+			long = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return long
 }

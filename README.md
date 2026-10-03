@@ -23,7 +23,7 @@ The files aren't code-signed, so Windows SmartScreen will probably warn you the 
 
 1. Press **Connect**, pick a protocol, and enter the host, port and login.
 2. The server's folders open in one pane and your PC's in the other.
-3. Drag files across, or select them and press **F5**. To move files instead of copying them, hold **Shift** while dragging or press **F6**.
+3. Drag files across, or select them and press **F5**. To move files from your PC to a server instead of copying them, hold **Shift** while dragging or press **F6**.
 4. Watch progress in the queue at the bottom, or in the Deck view.
 
 **Ctrl+K** opens a search box for commands, sites and files. The [user guide](docs/user-guide.md) has the keyboard shortcuts, the settings and troubleshooting.
@@ -57,11 +57,11 @@ Mini mode shrinks the window to a small always-on-top pill while transfers keep 
 
 - **FTPS**, with a certificate check that works for the self-signed certificates most seedboxes use.
 - **Faster FTPS downloads** over several connections, using the same settings as SFTP.
-- **Moving files.** Hold Shift while dragging, or press F6, to move files instead of copying them. It works between your PC and a server, and within either one.
+- **Moving files.** Hold Shift while dragging, or press F6, to move files from your PC to a server, or within one place. Files on a server are only ever copied to your PC, never moved.
 - **SSH key and SSH agent login** for SFTP.
 - **Plain FTP**, for servers that offer nothing else (unencrypted, so only use it on a network you trust).
 - **A third pane**, so you can have your PC and two servers open at once. Two is still the default.
-- **Drag and drop with Explorer.** Drop files on a server pane to upload them, or drag a file out of a pane to copy it to Explorer.
+- **Drag and drop with Explorer.** Drop files on a server pane to upload them, or drag files out of a pane to copy them to Explorer or any file manager.
 - **It remembers your setup.** Each pane's folder, the divider position, and which pane your server goes in. Each site can also connect automatically when warpseed starts.
 - **A safer resume** for SFTP and FTPS: the end of a half-finished file is checked against the server before continuing.
 - **Quicker transfer starts.**

@@ -74,6 +74,10 @@ export function DeleteLocal(arg1, arg2) {
   return window['go']['main']['App']['DeleteLocal'](arg1, arg2);
 }
 
+export function DeleteLocalPermanently(arg1, arg2) {
+  return window['go']['main']['App']['DeleteLocalPermanently'](arg1, arg2);
+}
+
 export function DeleteRemote(arg1, arg2, arg3) {
   return window['go']['main']['App']['DeleteRemote'](arg1, arg2, arg3);
 }
@@ -94,10 +98,6 @@ export function DismissUpdate(arg1) {
   return window['go']['main']['App']['DismissUpdate'](arg1);
 }
 
-export function DragBase() {
-  return window['go']['main']['App']['DragBase']();
-}
-
 export function EnqueueDownloads(arg1, arg2, arg3) {
   return window['go']['main']['App']['EnqueueDownloads'](arg1, arg2, arg3);
 }
@@ -112,6 +112,10 @@ export function EnqueueUploadsFromPaths(arg1, arg2, arg3) {
 
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
+}
+
+export function ImportSites(arg1) {
+  return window['go']['main']['App']['ImportSites'](arg1);
 }
 
 export function ListLocal(arg1) {
@@ -224,6 +228,10 @@ export function SetSiteRemotePath(arg1, arg2) {
 
 export function Sites() {
   return window['go']['main']['App']['Sites']();
+}
+
+export function StartDragOut(arg1, arg2) {
+  return window['go']['main']['App']['StartDragOut'](arg1, arg2);
 }
 
 export function TransferHistory() {

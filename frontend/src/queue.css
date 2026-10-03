@@ -147,7 +147,7 @@
 }
 
 .dock__body {
-  max-height: 280px;
+  max-height: min(280px, 38vh); /* leaves room for the views above on a short window */
   overflow-y: auto;
   border-top: 1px solid var(--border);
   padding-bottom: var(--sp-1);

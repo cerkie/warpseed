@@ -80,6 +80,24 @@ connection…**). Pick a saved site, or fill in a new one:
 Press **Connect**. Saved sites appear in the command palette (Ctrl+K →
 "Connect: *name*") and can be edited later under **Settings → Sites**.
 
+### Importing sites from FileZilla or WinSCP
+
+Press **Import sites…** in the Connect window, or in Settings → Sites, and pick
+the file, or drag the file onto either window (a dashed strip says so).
+
+- **FileZilla:** use File → Export in FileZilla (tick "Export passwords" if you
+  want them), or pick `sitemanager.xml` from `%APPDATA%\FileZilla`. Folders
+  become part of the site name, and saved passwords come with it unless
+  FileZilla protected them with a master password.
+- **WinSCP:** use Configuration → Export/Backup in WinSCP and pick the `.ini`
+  file. WinSCP scrambles its saved passwords, so those are not imported.
+- Only SFTP, FTP and FTPS sites are imported. WebDAV, S3 and the like are
+  skipped, and sites you already have (same protocol, host, port and user) are
+  left alone.
+- A PuTTY `.ppk` key cannot be read by warpseed. Those sites are imported
+  without the key; convert it to an OpenSSH key and pick it when you edit the
+  site.
+
 ### Host key check
 
 The first time you reach a server, warpseed shows its SSH host-key
@@ -535,14 +553,16 @@ Source: [github.com/ZyraLabs/warpseed](https://github.com/ZyraLabs/warpseed) · 
 Drag files between the panes to copy them. Hold **Shift** while dropping (or
 press **F6**) to move them instead.
 
-- Between This PC and a server, a move copies the files and deletes the
-  originals only after each copy has arrived complete. Folders that end up
-  empty are removed too. If a delete fails, the original stays and warpseed
-  says so.
+- From This PC to a server, a move uploads the files and deletes the originals
+  only after each copy has arrived complete. Folders that end up empty are
+  removed too. If a delete fails, the original stays and warpseed says so.
+- Files on a server are never moved to This PC. Dragging or pressing F5 copies
+  them, and the server keeps its originals. Delete them yourself if you want
+  them gone.
 - Inside one folder tree (on This PC, or on one server) a move is a rename:
   nothing is transferred. You cannot move directly from one server to another.
-- Drag without Shift between two panes of the same kind and a small note
-  beside the cursor tells you to hold Shift.
+- Drag without Shift between two panes of the same kind and a note at the
+  bottom of the pane tells you to hold Shift.
 
 ## Other things worth knowing
 
@@ -565,5 +585,8 @@ press **F6**) to move them instead.
   your password and files unencrypted, so only use it on a trusted network.
 - **Drag in from Explorer.** Drop files or folders onto a server pane to upload
   them to the folder shown, or onto a folder row to upload into it.
-- **Drag out to Explorer.** Drag one file onto an Explorer window or the desktop
-  to copy it there. For several files or folders, use the queue.
+- **Drag out to Explorer.** Drag files or folders from a pane out of the warpseed
+  window and drop them on Explorer or another file manager (OneCommander and
+  similar). Files from This PC are copied by the file manager. Files and folders
+  from a server are queued as downloads into the folder you dropped on; for a
+  moment an empty placeholder with the same name appears there.

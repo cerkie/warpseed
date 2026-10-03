@@ -211,7 +211,7 @@ const App = {
   async CancelQuit() {},
   async CloseToPill() {},
   async AppVersion() {
-    return "1.3.1";
+    return "1.3.2";
   },
   async CheckForUpdate() {
     await delay(120);

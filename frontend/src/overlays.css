@@ -247,6 +247,7 @@
 .field {
   display: grid;
   gap: 5px;
+  align-content: start; /* a taller neighbour must not stretch the gaps between a label and its input */
 }
 .field label {
   font-size: var(--text-2xs);

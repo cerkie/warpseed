@@ -5,7 +5,7 @@ A file transfer app for Windows. It connects over SFTP, FTPS or plain FTP, sends
 This is the [cerkie/warpseed](https://github.com/cerkie/warpseed) fork of [ZyraLabs/warpseed](https://github.com/ZyraLabs/warpseed). Zyra Labs wrote the transfer engine, the queue and the design. The fork adds the features listed [below](#what-this-fork-adds). Bugs and ideas for the fork go in [this repo's issues](https://github.com/cerkie/warpseed/issues).
 
 <p align="center">
-  <img src="docs/screenshots/deck.png?v=2" width="800" alt="The Deck view, showing one transfer running across eight connections">
+  <img src="docs/screenshots/deck.png?v=3" width="800" alt="The Deck view, showing one transfer running across eight connections">
 </p>
 
 ## Download

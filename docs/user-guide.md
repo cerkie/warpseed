@@ -100,6 +100,8 @@ the file, or drag the file onto either window (a dashed strip says so).
 
 ### Updating
 
+![The What's new window with the release notes and Install & restart](screenshots/update.png)
+
 When there is a newer release, a strip appears across the top ("warpseed 1.3.1
 is available") and a quiet "Update available" stays in the status bar. **What's
 new** shows the release notes. **Install & restart** downloads the release,
@@ -213,6 +215,8 @@ folder instead, carry the file past the first 30% of the pane (counted from the
 edge it came in by); the folder under the pointer lights up instead of the pane, and the status
 line says where it will land. Dragging a row that is
 not part of your selection drags just that row.
+
+![Dragging a file from This PC onto a server pane: the folder under the pointer is highlighted and the status line says "Drop into · linux-isos"](screenshots/drop-into.png)
 
 Dragging *within* one pane does nothing, and neither does dragging between
 two panes showing the same kind of place. That would be a move, which
@@ -472,6 +476,11 @@ to open that folder and to make a backup copy.
 issue on github.com/cerkie/warpseed with the version pre-filled), and
 **Support warpseed**.
 
+The **Data & About** tab says plainly that warpseed is a fork, and where
+donations and bug reports go:
+
+![The About section](screenshots/about.png)
+
 ---
 
 ## Keyboard reference
@@ -611,6 +620,8 @@ press **F6**) to move them instead.
   pane") adds a third file pane. Tab cycles through the panes. **F5** and **F6**
   send files to the pane you used most recently, and drag and drop works between
   any two.
+
+![Three panes: This PC and two servers](screenshots/three-panes.png)
 - **Plain FTP.** Choose "FTP (no encryption)" when adding a connection. It sends
   your password and files unencrypted, so only use it on a trusted network.
 - **Drag in from Explorer.** Drop files or folders onto a server pane to upload

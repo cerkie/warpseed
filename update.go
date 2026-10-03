@@ -14,14 +14,9 @@ import (
 	"warpseed/internal/applog"
 )
 
-/* Update notification.
- *
- * Notify only. warpseed is a portable single exe with no installer, so a
- * self-replacing updater would mean the app rewriting the file it is running
- * from, in a directory the user chose, possibly on a network share or behind
- * an antivirus that treats self-modification as exactly what it looks like.
- * The failure mode is a corrupted exe and no app. Telling the user and opening
- * the releases page costs one click and cannot break anything.
+/* Update check. One check per launch finds the newest release of the chosen
+ * repository, with its notes. Installing it is a separate step the user starts
+ * (update_install.go); the check itself only tells.
  *
  * The reason this exists at all: v1.0.0 has more downloads than every release
  * since combined, so most users are on a build that predates the NTFS
@@ -29,10 +24,9 @@ import (
  */
 
 const (
-	// The two places a release can be announced from. A build of the fork
-	// must default to the fork: pointing it at the original would offer its
+	// Releases are announced from the fork only. A build of the fork
+	// must not look at the original: it would offer its
 	// users a download that lacks the fork's changes.
-	upstreamRepo = "ZyraLabs/warpseed"
 	forkRepo     = "cerkie/warpseed"
 
 	// Deliberately carries no version. GitHub does not show us its logs, so a
@@ -54,7 +48,6 @@ const (
 // bookkeeping the Go side writes directly.
 const (
 	setUpdateCheck     = "updates.check"
-	setUpdateSource    = "updates.source" // fork | upstream
 	setUpdateDismissed = "updates.dismissed"
 	setUpdateLastCheck = "updates.last_check"
 )
@@ -68,6 +61,15 @@ type UpdateInfo struct {
 	URL       string `json:"url"`
 	Available bool   `json:"available"`
 	Dismissed bool   `json:"dismissed"`
+	// Name, Notes and Published are the release's title, its notes (markdown) and
+	// when it went out, for the in-app changelog.
+	Name      string `json:"name"`
+	Notes     string `json:"notes"`
+	Published string `json:"published"`
+	// CanInstall says warpseed can install this release itself; InstallKind is
+	// "installer" (an installed copy) or "portable" (a loose exe).
+	CanInstall  bool   `json:"canInstall"`
+	InstallKind string `json:"installKind"`
 }
 
 // AppVersion is the running build, read from the embedded manifest. The
@@ -82,11 +84,14 @@ func (a *App) AppVersion() string { return appVersion }
 func (a *App) CheckForUpdate() (UpdateInfo, error) {
 	info := UpdateInfo{Current: appVersion}
 
-	latest, url, err := a.fetchLatestRelease(a.ctx)
+	rel, err := a.fetchLatestRelease(a.ctx)
 	if err != nil {
 		return info, err
 	}
-	info.Latest, info.URL = latest, url
+	latest := rel.Version
+	info.Latest, info.URL = latest, rel.URL
+	info.Name, info.Notes, info.Published = rel.Name, rel.Notes, rel.Published
+	info.InstallKind, info.CanInstall = a.installPlan(rel)
 
 	if a.store != nil {
 		if serr := a.store.SetSetting(setUpdateLastCheck, nowRFC3339()); serr != nil {
@@ -131,14 +136,35 @@ func (a *App) startUpdateCheck() {
 			applog.Debugf("update: check failed (ignored): %v", err)
 			return
 		}
-		if !info.Available || info.Dismissed {
+		if !info.Available {
 			return
 		}
+		// Dismissed too: the banner stays hidden for that version, but the page
+		// still wants to know, to keep a quiet reminder in the status bar.
 		a.sink.Emit("update:available", info)
 	}()
 }
 
-func (a *App) fetchLatestRelease(parent context.Context) (version, url string, err error) {
+// releaseAsset is one downloadable file of a release.
+type releaseAsset struct {
+	Name   string `json:"name"`
+	URL    string `json:"browser_download_url"`
+	Size   int64  `json:"size"`
+	Digest string `json:"digest"` // "sha256:<hex>", which GitHub computes for every upload
+}
+
+// latestRelease is what a check learns about the newest release.
+type latestRelease struct {
+	Version   string
+	URL       string // the release page
+	Name      string
+	Notes     string // the release notes, markdown
+	Published string
+	Assets    []releaseAsset
+}
+
+func (a *App) fetchLatestRelease(parent context.Context) (latestRelease, error) {
+	var out latestRelease
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -147,7 +173,7 @@ func (a *App) fetchLatestRelease(parent context.Context) (version, url string, e
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+a.updateRepo()+"/releases/latest", nil)
 	if err != nil {
-		return "", "", err
+		return out, err
 	}
 	// GitHub answers 403 to an empty User-Agent, so this header is not
 	// optional politeness.
@@ -157,7 +183,7 @@ func (a *App) fetchLatestRelease(parent context.Context) (version, url string, e
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", "", err
+		return out, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -165,23 +191,27 @@ func (a *App) fetchLatestRelease(parent context.Context) (version, url string, e
 		// source IP and exhaustible by anything else on the same network.
 		// Ordinary failure, no retry.
 		if resp.StatusCode == http.StatusNotFound {
-			return "", "", fmt.Errorf("no releases published at %s yet", a.updateRepo())
+			return out, fmt.Errorf("no releases published at %s yet", a.updateRepo())
 		}
-		return "", "", fmt.Errorf("github returned %s", resp.Status)
+		return out, fmt.Errorf("github returned %s", resp.Status)
 	}
 
 	var rel struct {
-		TagName string `json:"tag_name"`
-		HTMLURL string `json:"html_url"`
+		TagName     string         `json:"tag_name"`
+		HTMLURL     string         `json:"html_url"`
+		Name        string         `json:"name"`
+		Body        string         `json:"body"`
+		PublishedAt string         `json:"published_at"`
+		Assets      []releaseAsset `json:"assets"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseBody)).Decode(&rel); err != nil {
-		return "", "", fmt.Errorf("decode release: %w", err)
+		return out, fmt.Errorf("decode release: %w", err)
 	}
 	v := strings.TrimPrefix(strings.TrimSpace(rel.TagName), "v")
 	if v == "" {
-		return "", "", fmt.Errorf("release has no tag")
+		return out, fmt.Errorf("release has no tag")
 	}
-	return v, rel.HTMLURL, nil
+	return latestRelease{Version: v, URL: rel.HTMLURL, Name: rel.Name, Notes: rel.Body, Published: rel.PublishedAt, Assets: rel.Assets}, nil
 }
 
 // newerVersion reports whether latest is a strictly higher release than
@@ -236,14 +266,11 @@ func parseVersion(v string) ([]int, bool) {
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
-// updateRepo is the repository releases are checked against: the fork unless
-// the user chose the original.
-func (a *App) updateRepo() string {
-	if a.store != nil && a.store.Setting(setUpdateSource, "fork") == "upstream" {
-		return upstreamRepo
-	}
-	return forkRepo
-}
+// updateRepo is the repository releases are checked against. Always this fork:
+// its version numbers run ahead of the original's, so checking the original
+// would never find anything, and if it ever did it would offer builds without
+// the fork's changes.
+func (a *App) updateRepo() string { return forkRepo }
 
 // UpdateRepo tells the settings dialog which repository a check will use.
 func (a *App) UpdateRepo() string { return a.updateRepo() }

@@ -26,7 +26,6 @@ each change lives in the code.
 | Per-site options (`implicit`, `keyPath`, `useAgent`, `autoConnect`) in `options_json` | `app.go` (`siteOptions`), `frontend/src/lib/protocol.ts` |
 | Connect on launch; remembered server pane; pane folders and divider restored | `App.tsx`, `lib/prefs.ts`, `ui.pane_state`, `ui.remote_side`, `ui.pane_split` |
 | Site add/edit/delete in Settings and Connect; shared always-ask delete | `SettingsDialog.tsx`, `QuickConnect.tsx`, `lib/sites.ts` |
-| Update source (fork or original) | `update.go` (`updateRepo`), `updates.source` setting |
 | Bandwidth schedule | `internal/dispatch` (`inScheduleWindow`), `bw.sched_*` settings |
 | Desktop notification on queue finish | `app.go` (`Notify`), `App.tsx` |
 | Transfer history | migration 015, `internal/queue/transfers.go` (`ClearCompleted`, `History`), `HistoryDialog.tsx` |
@@ -38,6 +37,7 @@ each change lives in the code.
 | Drag in from Explorer | `main.go` (`EnableFileDrop`), `lib/fileDrop.ts`, `app.go`/`dragout.go` (`EnqueueUploadsFromPaths`) |
 | Drag files and folders out to Explorer and other file managers | `dragout_windows.go` (native OLE drag), `dragout_watch_windows.go` (finds the drop folder), `lib/dragOut.ts`, `FilePane.tsx` (`armDragOut`) |
 | Import sites from FileZilla / WinSCP | `siteimport.go`, `lib/sites.ts`, `QuickConnect.tsx`, `SettingsDialog.tsx` |
+| Update from inside the app (check, notes, install) | `update.go`, `update_install.go`, `update_helper_windows.go`, `UpdateBanner.tsx`, `UpdateDialog.tsx` |
 | Installer build | `wails build -nsis` (needs NSIS) |
 
 ## Settings that need allow-listing

@@ -63,6 +63,8 @@ export function GetSettings():Promise<Record<string, string>>;
 
 export function ImportSites(arg1:string):Promise<main.ImportResult>;
 
+export function InstallUpdate():Promise<void>;
+
 export function ListLocal(arg1:string):Promise<localfs.Listing>;
 
 export function ListRemote(arg1:number,arg2:string):Promise<core.Listing>;

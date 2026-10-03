@@ -34,6 +34,7 @@ import { useUiStore } from "../store";
 import {
   ArrowUp,
   Check,
+  Folder,
   ChevronRight,
   Close,
   CopyBoth,
@@ -320,7 +321,10 @@ export default function QueueDock() {
   }, [transfers, sort]);
 
   const live = ordered.map((t) => {
-    const p = progress[t.id];
+    // Progress belongs to a running (or paused) transfer. A queued row can inherit
+    // a stale entry from an earlier transfer that had the same id, and would show
+    // that one's percentage before it has started.
+    const p = t.state === "active" || t.state === "paused" ? progress[t.id] : undefined;
     const bytes = p && p.bytes > t.bytesDone ? p.bytes : t.bytesDone;
     // Lanes belong to a running multi-connection transfer; once it settles,
     // fall back to the single bar so the row reads as done/paused/failed.
@@ -333,15 +337,60 @@ export default function QueueDock() {
     };
   });
 
-  let rows = live;
+  // Finished downloads leave the queue view; Deck and Activity still list them.
+  let rows = live.filter((t) => t.state !== "completed");
   if (sort.key === "rate" || sort.key === "pct") {
     const dir = sort.desc ? -1 : 1;
     const pctOf = (t: (typeof live)[number]) => (t.size > 0 ? t.bytes / t.size : 0);
-    rows = [...live].sort((a, b) => {
+    rows = [...rows].sort((a, b) => {
       const d = sort.key === "rate" ? a.rate - b.rate : pctOf(a) - pctOf(b);
       if (d === 0) return b.id - a.id; // ties keep queue order regardless of direction
       return d * dir;
     });
+  }
+
+  // ---- Folders and long waits ------------------------------------------
+  // Files queued from one folder share a batch. Once two or more of them are
+  // unfinished they show as a single row that expands. Rows that are only
+  // waiting their turn beyond the first few fold into "+N more waiting".
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showAllWaiting, setShowAllWaiting] = useState(false);
+  const items: QueueItem<(typeof live)[number]>[] = [];
+  {
+    const byBatch = new Map<string, { all: typeof live; open: typeof live }>();
+    for (const t of live) {
+      if (!t.batch) continue;
+      let g = byBatch.get(t.batch);
+      if (!g) byBatch.set(t.batch, (g = { all: [], open: [] }));
+      g.all.push(t);
+    }
+    for (const t of rows) if (t.batch) byBatch.get(t.batch)?.open.push(t);
+    const emitted = new Set<string>();
+    let plainWaiting = 0;
+    let hidden = 0;
+    for (const t of rows) {
+      const g = t.batch ? byBatch.get(t.batch) : undefined;
+      if (t.batch && g && g.open.length >= 2) {
+        if (emitted.has(t.batch)) continue;
+        emitted.add(t.batch);
+        const name = t.batch.slice(t.batch.indexOf("|") + 1) || "folder";
+        items.push({ kind: "group", key: t.batch, name, all: g.all, open: g.open });
+        if (expanded.has(t.batch)) for (const c of g.open) items.push({ kind: "row", t: c, child: true });
+        continue;
+      }
+      if (t.state === "pending" && !t.conflict) {
+        plainWaiting++;
+        if (!showAllWaiting && plainWaiting > WAITING_SHOWN) {
+          hidden++;
+          continue;
+        }
+      }
+      items.push({ kind: "row", t });
+    }
+    if (hidden > 0) items.push({ kind: "more", hidden, open: false });
+    else if (showAllWaiting && plainWaiting > WAITING_SHOWN) {
+      items.push({ kind: "more", hidden: plainWaiting - WAITING_SHOWN, open: true });
+    }
   }
 
   // The body is the scroll container; the toolbar and column headers sit
@@ -362,6 +411,8 @@ export default function QueueDock() {
   // Stable callbacks: the virtualizer rebuilds its whole measurement table
   // whenever getItemKey/estimateSize change identity, which per progress
   // tick would be the O(rows) work virtualizing was meant to remove.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
 
@@ -410,16 +461,19 @@ export default function QueueDock() {
       setSelected(new Set(rowsRef.current.map((t) => t.id)));
     }
   };
-  const getItemKey = useCallback((i: number) => rowsRef.current[i].id, []);
+  const getItemKey = useCallback((i: number) => {
+    const it = itemsRef.current[i];
+    return it.kind === "row" ? `r${it.t.id}` : it.kind === "group" ? `g${it.key}` : "more";
+  }, []);
   const estimateSize = useCallback(
     (i: number) => {
-      const t = rowsRef.current[i];
-      return t.state === "failed" && t.error ? ROW_H_ERROR : ROW_H;
+      const it = itemsRef.current[i];
+      return it.kind === "row" && it.t.state === "failed" && it.t.error ? ROW_H_ERROR : ROW_H;
     },
     [],
   );
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: items.length,
     getScrollElement: () => bodyRef.current,
     getItemKey,
     estimateSize,
@@ -500,12 +554,12 @@ export default function QueueDock() {
   // progress is at stake the dialog says what is deleted. The ids are
   // snapshotted with the count, and the backend re-checks each row is still
   // unfinished, so what the dialog says is what happens.
-  const cancelSelected = useCallback(() => {
+  const cancelSet = useCallback((sel: Set<number>) => {
     // Live progress is read at click time from the store rather than
     // subscribed: as a dependency it would recreate this callback on
     // every progress tick.
     const progress = useUiStore.getState().progress;
-    const rowsToCancel = transfers.filter((t) => selected.has(t.id) && cancellable(t));
+    const rowsToCancel = transfers.filter((t) => sel.has(t.id) && cancellable(t));
     const ids = rowsToCancel.map((t) => t.id);
     if (ids.length === 0) return;
     const run = () => {
@@ -545,7 +599,8 @@ export default function QueueDock() {
       danger: true,
       onConfirm: run,
     });
-  }, [transfers, selected, askConfirm]);
+  }, [transfers, askConfirm]);
+  const cancelSelected = useCallback(() => cancelSet(selected), [cancelSet, selected]);
 
   // The "I queued a whole folder by mistake" button. Always confirms: it is
   // one click on a header button, and it acts on every waiting row,
@@ -693,6 +748,13 @@ export default function QueueDock() {
     <div
       className={`dock ${active.length ? "dock--active" : ""} ${streak ? "dock--streak" : ""}`}
       onAnimationEnd={(e) => e.animationName === "warp-streak" && setStreak(false)}
+      onMouseDown={(e) => {
+        // A click anywhere in the open dock gives the queue the keyboard, so Ctrl+A
+        // and Delete act on its rows and never reach a pane.
+        if (open && !(e.target as Element).closest("button,input,select,textarea,a")) {
+          bodyRef.current?.focus({ preventScroll: true });
+        }
+      }}
     >
       <button className="dock__strip" onClick={() => setOpen(!open)} aria-expanded={open}>
         <Slipstream size={14} className="dock__glyph" />
@@ -702,27 +764,26 @@ export default function QueueDock() {
           />
         </span>
         {aggRate > 0 && <span className="agg-rate">{formatSize(aggRate)}/s</span>}
-        <span>
+        <span className="dock__summary">
           {active.length} active · {counts.queued} queued
+          {counts.held > 0 && (
+            <span className="dock__flag dock__flag--held">
+              {" · "}
+              {counts.held} need{counts.held === 1 ? "s" : ""} a decision
+            </span>
+          )}
+          {counts.failed > 0 && (
+            <span className="dock__flag dock__flag--failed">
+              {" · "}
+              {counts.failed} failed
+            </span>
+          )}
+          {paused && (
+            <span className="dock__flag dock__flag--paused" title="Nothing starts until you resume the queue">
+              {" · "}queue paused
+            </span>
+          )}
         </span>
-        {paused && (
-          <span className="chip-paused" title="Nothing starts until you resume the queue">
-            <Pause size={11} />
-            queue paused
-          </span>
-        )}
-        {counts.held > 0 && (
-          <span className="chip-held">
-            <Warning size={11} />
-            {counts.held} need{counts.held === 1 ? "s" : ""} a decision
-          </span>
-        )}
-        {counts.failed > 0 && (
-          <span className="chip-failed">
-            <Warning size={11} />
-            {counts.failed} failed
-          </span>
-        )}
         <span className="grow" />
         <span className="dock__title">Queue</span>
         <ChevronRight size={12} className={`dock__caret ${open ? "dock__caret--open" : ""}`} />
@@ -906,7 +967,108 @@ export default function QueueDock() {
               style={{ height: virtualizer.getTotalSize() }}
             >
             {virtualizer.getVirtualItems().map((vi) => {
-              const t = rows[vi.index];
+              const item = items[vi.index];
+              if (item.kind === "more") {
+                return (
+                  <div
+                    key="more"
+                    data-index={vi.index}
+                    ref={virtualizer.measureElement}
+                    className="trow trow--virtual trow--more"
+                    style={{ transform: `translateY(${vi.start - listTop}px)` }}
+                    role="row"
+                  >
+                    <button className="trow__morebtn" onClick={() => setShowAllWaiting(!item.open)}>
+                      {item.open ? "Show fewer waiting transfers" : `+${item.hidden} more waiting · show all`}
+                    </button>
+                  </div>
+                );
+              }
+              if (item.kind === "group") {
+                const g = item;
+                const first = g.open[0];
+                const size = (t: (typeof g.all)[number]) => Math.max(t.size, 0);
+                const totalSize = g.all.reduce((s, t) => s + size(t), 0);
+                const doneBytes = g.all.reduce(
+                  (s, t) => s + (t.state === "completed" ? size(t) : Math.min(t.bytes, size(t))),
+                  0,
+                );
+                const gpct = totalSize > 0 ? Math.min(doneBytes / totalSize, 1) : 0;
+                const rate = g.open.reduce((s, t) => s + t.rate, 0);
+                const nActive = g.open.filter((t) => t.state === "active").length;
+                const nFailed = g.open.filter((t) => t.state === "failed").length;
+                const nDone = g.all.filter((t) => t.state === "completed").length;
+                const isOpen = expanded.has(g.key);
+                const siteName = sites.find((s) => s.id === first.siteId)?.name ?? `site ${first.siteId}`;
+                const cut = first.dst.lastIndexOf(g.name);
+                const folderDst = cut >= 0 ? first.dst.slice(0, cut + g.name.length) : first.dst;
+                const toggle = () =>
+                  setExpanded((prev) => {
+                    const next = new Set(prev);
+                    if (!next.delete(g.key)) next.add(g.key);
+                    return next;
+                  });
+                const pausable = g.open.filter((t) => (t.state === "active" || t.state === "pending") && !t.conflict);
+                const resumable = g.open.filter((t) => t.state === "paused" || t.state === "failed");
+                const summary =
+                  `${nDone} of ${g.all.length} done` +
+                  (nFailed ? ` · ${nFailed} failed` : "") +
+                  (nActive ? ` · ${nActive} running` : "");
+                return (
+                  <div
+                    key={`g${g.key}`}
+                    data-index={vi.index}
+                    ref={virtualizer.measureElement}
+                    className={`trow trow--virtual trow--group trow--${nActive ? "active" : nFailed ? "failed" : "pending"} ${first.direction === "upload" ? "trow--up" : ""}`}
+                    style={{ transform: `translateY(${vi.start - listTop}px)` }}
+                    onClick={toggle}
+                    role="row"
+                    aria-expanded={isOpen}
+                  >
+                    <span className="trow__icon">
+                      <ChevronRight size={13} className={`trow__caret ${isOpen ? "trow__caret--open" : ""}`} />
+                    </span>
+                    <span className="trow__name" title={`${g.name}: ${summary}`}>
+                      <Folder size={12} className="trow__folder" /> {g.name}
+                      <span className="trow__sub"> · {summary}</span>
+                    </span>
+                    <span className="trow__route" title={folderDst}>
+                      {first.direction === "upload" ? `This PC → ${siteName}:${folderDst}` : `${siteName} → ${folderDst}`}
+                    </span>
+                    <span className="trow__size" title={totalSize > 0 ? `${totalSize} bytes` : undefined}>
+                      {totalSize > 0 ? formatSize(totalSize) : "—"}
+                    </span>
+                    <span className="trow__rate">
+                      {nActive > 0 && rate > 0 ? `${formatSize(rate)}/s` : ""}
+                    </span>
+                    <span className="trow__pct">{totalSize > 0 ? `${Math.floor(gpct * 100)}%` : ""}</span>
+                    <span className="trow__bar" aria-hidden>
+                      <div style={{ transform: `scaleX(${gpct})` }} />
+                    </span>
+                    <span className="trow__actions" onClick={(e) => e.stopPropagation()}>
+                      {pausable.length > 0 ? (
+                        <button
+                          title="Pause this folder"
+                          onClick={() => pausable.forEach((t) => void pauseTransfer(t.id))}
+                        >
+                          <Pause size={11} />
+                        </button>
+                      ) : resumable.length > 0 ? (
+                        <button
+                          title="Resume or retry this folder"
+                          onClick={() => resumable.forEach((t) => void resumeTransfer(t.id))}
+                        >
+                          <Play size={11} />
+                        </button>
+                      ) : null}
+                      <button title="Cancel what is left of this folder" onClick={() => cancelSet(new Set(g.open.map((t) => t.id)))}>
+                        <Close size={11} />
+                      </button>
+                    </span>
+                  </div>
+                );
+              }
+              const t = item.t;
               const pct = t.size > 0 ? Math.min(t.bytes / t.size, 1) : 0;
               const siteName = sites.find((s) => s.id === t.siteId)?.name ?? `site ${t.siteId}`;
               const hasError = t.state === "failed" && t.error;
@@ -918,7 +1080,7 @@ export default function QueueDock() {
                   key={t.id}
                   data-index={vi.index}
                   ref={virtualizer.measureElement}
-                  className={`trow trow--virtual trow--${t.state} ${hasError ? "trow--witherror" : ""} ${conflict ? "trow--held" : ""} ${t.direction === "upload" ? "trow--up" : ""} ${selected.has(t.id) ? "trow--selected" : ""}`}
+                  className={`trow trow--virtual trow--${t.state} ${item.child ? "trow--child" : ""} ${hasError ? "trow--witherror" : ""} ${conflict ? "trow--held" : ""} ${t.direction === "upload" ? "trow--up" : ""} ${selected.has(t.id) ? "trow--selected" : ""}`}
                   style={{ transform: `translateY(${vi.start - listTop}px)` }}
                   onClick={(e) => selectRow(t.id, e)}
                   role="row"
@@ -1013,3 +1175,11 @@ export default function QueueDock() {
     </div>
   );
 }
+
+/** How many plain waiting rows show before the rest fold into "+N more". */
+const WAITING_SHOWN = 10;
+
+type QueueItem<T> =
+  | { kind: "row"; t: T; child?: boolean }
+  | { kind: "group"; key: string; name: string; all: T[]; open: T[] }
+  | { kind: "more"; hidden: number; open: boolean };

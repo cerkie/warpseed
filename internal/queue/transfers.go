@@ -39,20 +39,23 @@ type Transfer struct {
 	Conflict *string `json:"conflict"`
 	// MoveRoot is set for a move: the source is deleted once this completes.
 	MoveRoot string `json:"moveRoot"`
+	// Batch is "<id>|<folder name>" for a file queued as part of a folder, so
+	// the queue can show the folder as one row; empty otherwise.
+	Batch string `json:"batch"`
 }
 
 var ErrTransferNotFound = errors.New("transfer not found")
 
 const transferCols = `id,site_id,engine,direction,src,dst,size,state,priority,
 	bytes_done,attempt,next_retry_at,error,src_mtime,created_at,updated_at,
-	started_at,start_bytes,conflict,move_root`
+	started_at,start_bytes,conflict,move_root,batch`
 
 func scanTransfer(row interface{ Scan(...any) error }) (Transfer, error) {
 	var t Transfer
 	err := row.Scan(&t.ID, &t.SiteID, &t.Engine, &t.Direction, &t.Src, &t.Dst,
 		&t.Size, &t.State, &t.Priority, &t.BytesDone, &t.Attempt,
 		&t.NextRetryAt, &t.Error, &t.SrcMtime, &t.CreatedAt, &t.UpdatedAt,
-		&t.StartedAt, &t.StartBytes, &t.Conflict, &t.MoveRoot)
+		&t.StartedAt, &t.StartBytes, &t.Conflict, &t.MoveRoot, &t.Batch)
 	return t, err
 }
 
@@ -118,9 +121,9 @@ func (s *Store) EnqueueTransfer(t Transfer) (int64, error) {
 	}
 	now := nowUTC()
 	res, err := s.db.Exec(
-		`INSERT INTO transfers(site_id,engine,direction,src,dst,size,state,priority,created_at,updated_at,move_root)
-		 VALUES (?,?,?,?,?,?,'pending',?,?,?,?)`,
-		t.SiteID, t.Engine, t.Direction, t.Src, t.Dst, t.Size, t.Priority, now, now, t.MoveRoot)
+		`INSERT INTO transfers(site_id,engine,direction,src,dst,size,state,priority,created_at,updated_at,move_root,batch)
+		 VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?)`,
+		t.SiteID, t.Engine, t.Direction, t.Src, t.Dst, t.Size, t.Priority, now, now, t.MoveRoot, t.Batch)
 	if err != nil {
 		return 0, fmt.Errorf("enqueue transfer: %w", err)
 	}

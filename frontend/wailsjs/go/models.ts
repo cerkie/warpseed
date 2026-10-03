@@ -258,6 +258,11 @@ export namespace main {
 	    url: string;
 	    available: boolean;
 	    dismissed: boolean;
+	    name: string;
+	    notes: string;
+	    published: string;
+	    canInstall: boolean;
+	    installKind: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
@@ -270,6 +275,11 @@ export namespace main {
 	        this.url = source["url"];
 	        this.available = source["available"];
 	        this.dismissed = source["dismissed"];
+	        this.name = source["name"];
+	        this.notes = source["notes"];
+	        this.published = source["published"];
+	        this.canInstall = source["canInstall"];
+	        this.installKind = source["installKind"];
 	    }
 	}
 	export class UploadItem {
@@ -392,6 +402,7 @@ export namespace queue {
 	    startBytes: number;
 	    conflict?: string;
 	    moveRoot: string;
+	    batch: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Transfer(source);
@@ -419,6 +430,7 @@ export namespace queue {
 	        this.startBytes = source["startBytes"];
 	        this.conflict = source["conflict"];
 	        this.moveRoot = source["moveRoot"];
+	        this.batch = source["batch"];
 	    }
 	}
 

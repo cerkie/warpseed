@@ -902,3 +902,29 @@ func TestClearCompletedKeepsHistory(t *testing.T) {
 		t.Fatalf("History = %+v, %v", h, err)
 	}
 }
+
+func TestBatchIsStoredWithTheTransfer(t *testing.T) {
+	s := openTestStore(t)
+	site := seedSite(t, s)
+	id, err := s.EnqueueTransfer(Transfer{SiteID: site, Src: "/show/e1.mkv", Dst: "/l/show/e1.mkv", Batch: "123|show"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alone, _ := s.EnqueueTransfer(Transfer{SiteID: site, Src: "/f.bin", Dst: "/l/f.bin"})
+	got, err := s.PendingTransfers("2026-08-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range got {
+		switch tr.ID {
+		case id:
+			if tr.Batch != "123|show" {
+				t.Fatalf("batch = %q", tr.Batch)
+			}
+		case alone:
+			if tr.Batch != "" {
+				t.Fatalf("a lone file has batch %q", tr.Batch)
+			}
+		}
+	}
+}

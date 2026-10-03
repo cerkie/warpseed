@@ -185,6 +185,7 @@ type dragSession struct {
 	items  []DragOutItem
 	paths  []string // what is offered: the files themselves, or placeholders
 	dir    string   // where the placeholders live, for a server drag
+	hwnd   uintptr  // the window the drag started in
 }
 
 func (s *dragSession) remote() bool { return s.siteID != 0 }
@@ -490,27 +491,36 @@ func hookWindow(hwnd uintptr) {
 
 // runDrag runs on the window thread, inside the window procedure.
 func runDrag(sess *dragSession) {
+	defer dragOutBusy.Store(false)
 	vtOnce.Do(initVtables)
 	procOleInit.Call(0)
 	if err := sess.prepare(); err != nil {
 		log.Printf("drag-out: could not prepare files: %v", err)
+		sess.app.sink.Emit("dragout:end", nil)
 		return
 	}
 	var watch *dropWatch
 	if sess.remote() {
 		watch = startDropWatch()
 	}
+	stopPos := make(chan struct{})
+	go sess.app.streamCursor(sess.hwnd, stopPos)
 	data := register(&dataObject{sess: sess}, vtData)
 	src := register(&dropSource{}, vtSource)
 	var effect uint32
 	res, _, _ := procDoDragDrop.Call(data, src, dropEffectCopy, uintptr(unsafe.Pointer(&effect)))
 	comRelease(data)
 	comRelease(src)
-	log.Printf("drag-out: finished, result=%#x effect=%d", uint32(res), effect)
+	close(stopPos)
+	// Released over warpseed itself: the page finishes the drop (from the drag it
+	// remembers), so nothing is waiting for a file manager to copy anything.
+	onSelf := outsideBy(cursorPos(), clientScreenRect(sess.hwnd)) == 0
+	log.Printf("drag-out: finished, result=%#x effect=%d onSelf=%v", uint32(res), effect, onSelf)
+	sess.app.sink.Emit("dragout:end", map[string]bool{"droppedOnSelf": onSelf})
 	if !sess.remote() {
 		return
 	}
-	if effect&dropEffectCopy == 0 {
+	if onSelf || effect&dropEffectCopy == 0 {
 		watch.stop()
 		_ = os.RemoveAll(sess.dir)
 		return
@@ -527,11 +537,24 @@ func (a *App) startNativeDrag(siteID int64, items []DragOutItem) error {
 	if hwnd == 0 || !leftButtonDown() {
 		return nil
 	}
+	sess.hwnd = hwnd
+	if !dragOutBusy.CompareAndSwap(false, true) {
+		return nil
+	}
 	hookWindow(hwnd)
 	go func() {
+		// Only a pointer that has clearly left takes the drag native; one that
+		// brushed the edge and came back keeps its in-window drag.
+		if !commitToNativeDrag(hwnd) {
+			dragOutBusy.Store(false)
+			return
+		}
+		a.sink.Emit("dragout:begin", nil)
 		cancelWebViewDrag()
 		time.Sleep(30 * time.Millisecond)
 		if !leftButtonDown() {
+			a.sink.Emit("dragout:end", nil)
+			dragOutBusy.Store(false)
 			return
 		}
 		hookMu.Lock()

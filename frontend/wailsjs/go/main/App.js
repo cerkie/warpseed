@@ -118,6 +118,10 @@ export function ImportSites(arg1) {
   return window['go']['main']['App']['ImportSites'](arg1);
 }
 
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
+}
+
 export function ListLocal(arg1) {
   return window['go']['main']['App']['ListLocal'](arg1);
 }

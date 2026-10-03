@@ -11,6 +11,7 @@ import {
   CancelTransfer,
   CheckForUpdate,
   DismissUpdate,
+  InstallUpdate,
   ResolveConflicts,
   ClearDoneTransfers,
   ClearFailedTransfers,
@@ -244,6 +245,7 @@ export interface Transfer {
   /** bytes_done when this run began — a resumed transfer moved
       size - startBytes, not size. */
   startBytes?: number;
+/** "<id>|<folder name>" for a file queued as part of a folder, so the queue      can show the folder as one row; empty or absent for a lone file. */  batch?: string;
 }
 
 export interface DownloadItem {
@@ -293,6 +295,7 @@ export interface UpdateInfo {
   url: string;
   available: boolean;
   dismissed: boolean;
+/** The release's title, its notes (markdown) and when it went out. */  name: string;  notes: string;  published: string;  /** warpseed can install this release itself (a checksum is published and the      file is there); false means the banner can only open the release page. */  canInstall: boolean;  installKind: "installer" | "portable" | "";
 }
 
 /** The running build, from the Go side. The frontend used to keep its own copy
@@ -483,3 +486,14 @@ export interface ImportResult {
   ppkKeys: number;
 }
 export const importSites = (file: string): Promise<ImportResult> => ImportSites(file);
+
+/** How an in-app install is going (the update:state event). */
+export interface UpdateState {
+  phase: "downloading" | "installing" | "failed";
+  done: number;
+  total: number;
+  error?: string;
+}
+/** Download, verify and install the latest release, then restart into it.
+    Returns at once; follow update:state. */
+export const installUpdate = (): Promise<void> => InstallUpdate();

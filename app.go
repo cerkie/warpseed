@@ -159,6 +159,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	go a.dispatcher.Run(ctx)
 	a.startUpdateCheck()
+	a.afterUpdate()
 	_ = os.RemoveAll(dragTempRoot())
 }
 
@@ -1109,6 +1110,7 @@ func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []Dow
 			a.sink.Emit("app:error", nerr.Error())
 			continue
 		}
+		batch := newBatch(rootName)
 		err := client.WalkFiles(a.ctx, root, func(remote string, size, mtime int64) error {
 			rel := strings.TrimPrefix(remote, root)
 			rel = strings.TrimPrefix(rel, "/")
@@ -1120,7 +1122,7 @@ func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []Dow
 				return nil
 			}
 			id, err := a.enqueueWithPolicy(queue.Transfer{
-				SiteID: siteID, Src: remote, Dst: dst, Size: size, MoveRoot: moveRoot(dir.Move, root),
+				SiteID: siteID, Src: remote, Dst: dst, Size: size, MoveRoot: moveRoot(dir.Move, root), Batch: batch,
 			}, queue.FileFacts{Size: size, Mtime: mtime}, nil)
 			if err != nil {
 				return err
@@ -1212,6 +1214,7 @@ func (a *App) expandLocalDirs(siteID int64, dirs []UploadItem, remoteDir string)
 	cache := newRemoteDirCache(upClient)
 	for _, dir := range dirs {
 		root := filepath.Clean(dir.Src)
+		batch := newBatch(filepath.Base(root))
 		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if cerr := a.ctx.Err(); cerr != nil {
 				return cerr
@@ -1246,7 +1249,7 @@ func (a *App) expandLocalDirs(siteID int64, dirs []UploadItem, remoteDir string)
 			}
 			dst := path.Join(remoteDir, filepath.Base(root), filepath.ToSlash(rel))
 			id, eerr := a.enqueueWithPolicyCached(queue.Transfer{
-				SiteID: siteID, Direction: "upload", Src: p, Dst: dst, Size: info.Size(), MoveRoot: moveRoot(dir.Move, root),
+				SiteID: siteID, Direction: "upload", Src: p, Dst: dst, Size: info.Size(), MoveRoot: moveRoot(dir.Move, root), Batch: batch,
 			}, queue.FileFacts{Size: info.Size(), Mtime: info.ModTime().Unix()}, upClient, cache)
 			if eerr != nil {
 				return eerr
@@ -1486,7 +1489,12 @@ func (a *App) removeParts(t queue.Transfer, going []int64) bool {
 		for _, s := range suffixes {
 			if rerr := c.RemoveRemote(t.Dst + s); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
 				log.Printf("clear failed: remove remote %s: %v", t.Dst+s, rerr)
-				ok = false
+				// Some servers answer "permission denied" for a name that was never
+				// there, which would keep this row forever. With nothing transferred
+				// there is no data to protect, so only a row that moved bytes is kept.
+				if t.BytesDone > 0 {
+					ok = false
+				}
 			}
 		}
 		return ok
@@ -1850,7 +1858,6 @@ var settingValidators = map[string]func(string) error{
 	// data-safety fixes — are exactly the ones who would never find an
 	// off-by-default switch.
 	"updates.check":  oneOf("0", "1"),
-	"updates.source": oneOf("fork", "upstream"),
 	// Unlisted keys are hard-rejected, so this line is mandatory for the
 	// setting to be writable at all.
 	"ui.close_action": oneOf("ask", "quit", "pill"),
@@ -2146,4 +2153,10 @@ func (a *App) TransferHistory() ([]queue.HistoryEntry, error) {
 func (a *App) secondInstance(options.SecondInstanceData) {
 	wruntime.WindowUnminimise(a.ctx)
 	wruntime.Show(a.ctx)
+}
+
+// newBatch labels the files of one queued folder so the queue can show them as
+// a single row: "<unique id>|<folder name>".
+func newBatch(folder string) string {
+	return fmt.Sprintf("%d|%s", time.Now().UnixNano(), folder)
 }

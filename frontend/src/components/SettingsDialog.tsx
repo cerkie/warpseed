@@ -15,7 +15,7 @@ import {
   checkForUpdate,
   updateRepo,
 } from "../ipc";
-import { COMPANY, DONATE_URL, WEBSITE_URL, bugReportUrl } from "../lib/branding";
+import { COMPANY, DONATE_URL, REPO_URL, WEBSITE_URL, bugReportUrl } from "../lib/branding";
 import { formatSize } from "../lib/format";
 import { applyTheme, coerceTheme, THEMES, type ThemePref } from "../lib/theme";
 import { DEFAULT_FORM, DEFAULT_PORT, formFields, formOf, secretLabel, type SiteForm } from "../lib/protocol";
@@ -105,6 +105,9 @@ export default function SettingsDialog() {
   const [version, setVersion] = useState("");
   const [updateMsg, setUpdateMsg] = useState("");
   const [checking, setChecking] = useState(false);
+  const update = useUiStore((s) => s.update);
+  const setUpdate = useUiStore((s) => s.setUpdate);
+  const setUpdateOpen = useUiStore((s) => s.setUpdateOpen);
   const [repo, setRepo] = useState("");
   useEffect(() => {
     void updateRepo().then(setRepo).catch(() => undefined);
@@ -803,8 +806,28 @@ export default function SettingsDialog() {
         <section className="set-section" data-tab="about">
           <h3>About</h3>
           <p className="set-note set-blurb">
-            warpseed {version} — a free, fast seedbox transfer client by {COMPANY}.
+            warpseed {version} — a free, fast file transfer client for Windows.
           </p>
+          <div className="about-fork">
+            <p>
+              <strong>This is a fork.</strong> warpseed was created by {COMPANY}, who built the transfer engine and had
+              the original idea. This fork adds FTP and FTPS, a third pane, drag and drop with Explorer, in-app
+              updates and more, on top of their work.
+            </p>
+            <p>
+              <strong>Donations go to {COMPANY}</strong>, not to the fork, because they did the hard part.{" "}
+              <strong>Bug reports sent from here go to this fork</strong>, not to them, so the fork&rsquo;s issue
+              page is where they land.
+            </p>
+            <div className="about-fork__links">
+              <button className="btn" onClick={() => openExternal("https://github.com/ZyraLabs/warpseed")}>
+                Original project
+              </button>
+              <button className="btn" onClick={() => openExternal(REPO_URL)}>
+                This fork
+              </button>
+            </div>
+          </div>
           <div className="update-card">
             <Switch
               checked={(cfg["updates.check"] ?? "1") === "1"}
@@ -812,29 +835,6 @@ export default function SettingsDialog() {
             >
               Check for updates when warpseed starts
             </Switch>
-            <div className="update-card__row">
-              <span className="set-note">Look for releases from</span>
-              <div className="segmented" role="radiogroup" aria-label="Where to check for updates">
-                {[
-                  ["fork", "This fork"],
-                  ["upstream", "Original"],
-                ].map(([v, label]) => (
-                  <button
-                    key={v}
-                    className={(cfg["updates.source"] ?? "fork") === v ? "seg--on" : ""}
-                    role="radio"
-                    aria-checked={(cfg["updates.source"] ?? "fork") === v}
-                    onClick={() => {
-                      put("updates.source", v);
-                      setUpdateMsg("");
-                      setTimeout(() => void updateRepo().then(setRepo), 150);
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
             <div className="update-card__row">
               <button
                 className="btn"
@@ -844,6 +844,7 @@ export default function SettingsDialog() {
                   setUpdateMsg("");
                   void checkForUpdate()
                     .then((u) => {
+                      if (u.available) setUpdate(u);
                       // The manual check reports the up-to-date case too; the
                       // automatic one stays silent about it.
                       setUpdateMsg(
@@ -858,21 +859,37 @@ export default function SettingsDialog() {
               >
                 {checking ? "Checking…" : "Check now"}
               </button>
+              {update?.available && (
+                <button
+                  className="btn btn--primary"
+                  onClick={() => {
+                    setOpen(false);
+                    setUpdateOpen(true);
+                  }}
+                >
+                  What&rsquo;s new &amp; install
+                </button>
+              )}
               <span className="set-note">{updateMsg || (repo ? `Checks github.com/${repo}` : "")}</span>
             </div>
           </div>
           <p className="set-note">
             One check per launch. It sends no identifiers and no usage data: the
-            request only asks a public page what the latest version is. warpseed
-            never downloads or replaces itself; the banner opens the release
-            page and you choose. It is free and always will be; if it saves you
-            time, a coffee keeps the updates coming.
+            request only asks a public page what the latest version is. When
+            there is a newer release, nothing is downloaded until you press
+            Install, and the download is checked against the checksum GitHub
+            publishes for it before anything is replaced. It is free and always
+            will be; if it saves you time, a coffee for {COMPANY} is the best thank-you.
           </p>
           <div className="dialog__actions" style={{ marginTop: "var(--sp-2)" }}>
             <button className="btn" onClick={() => openExternal(WEBSITE_URL)}>
               zyralabs.tech
             </button>
-            <button className="btn" onClick={() => openExternal(bugReportUrl(version))}>
+            <button
+              className="btn"
+              title="Opens a new issue on this fork's GitHub page"
+              onClick={() => openExternal(bugReportUrl(version))}
+            >
               <Bug size={12} className="btn__ico" /> Report a bug
             </button>
             <button className="btn" onClick={() => void logDir()} title="warpseed.log — attach it to a bug report">
@@ -888,7 +905,7 @@ export default function SettingsDialog() {
             </label>
             <span style={{ flex: 1 }} />
             <button className="btn btn--primary" onClick={() => openExternal(DONATE_URL)}>
-              <Heart size={12} className="btn__ico" /> Support warpseed
+              <Heart size={12} className="btn__ico" /> Support {COMPANY}
             </button>
           </div>
         </section>

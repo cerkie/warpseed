@@ -9,6 +9,7 @@ import { invalidateDir, purgeSource } from "./lib/treeCache";
 import CloseGuardDialog from "./components/CloseGuardDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
 import UpdateBanner from "./components/UpdateBanner";
+import UpdateDialog from "./components/UpdateDialog";
 import HostKeyDialog from "./components/HostKeyDialog";
 import HistoryDialog from "./components/HistoryDialog";
 import { Columns, Heart, Search, Shrink, Sliders, Slipstream } from "./components/Icon";
@@ -53,6 +54,8 @@ export default function App() {
   const activePane = useUiStore((s) => s.activePane);
   const setActivePane = useUiStore((s) => s.setActivePane);
   const dbVersion = useUiStore((s) => s.dbSchemaVersion);
+  const update = useUiStore((s) => s.update);
+  const setUpdateOpen = useUiStore((s) => s.setUpdateOpen);
   const setDbSchemaVersion = useUiStore((s) => s.setDbSchemaVersion);
   const setSites = useUiStore((s) => s.setSites);
   const setConnState = useUiStore((s) => s.setConnState);
@@ -462,6 +465,7 @@ export default function App() {
         </span>
         <Sparkline />
         <span className="spacer" />
+{update?.available && (          <button            className="statusbar__update"            title="See what is new and install it"            onClick={() => setUpdateOpen(true)}          >            Update available · {update.latest}          </button>        )}
         <button
           className="statusbar__heart"
           title={`Support warpseed — buy ${COMPANY} a coffee`}
@@ -478,6 +482,7 @@ export default function App() {
       </footer>
 
       <CommandPalette />
+      <UpdateDialog />
       <QuickConnect />
       <SettingsDialog />
       <HistoryDialog />

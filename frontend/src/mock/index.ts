@@ -218,13 +218,20 @@ const App = {
     // Drive the banner with ?update=1; otherwise report "current" so the mock
     // does not cry wolf every time someone opens it.
     const want = new URLSearchParams(location.search).get("update") === "1";
-    return {
-      current: "1.1.8",
-      latest: want ? "1.2.0" : "1.1.8",
-      url: "https://github.com/cerkie/warpseed/releases/tag/v1.2.0",
-      available: want,
-      dismissed: false,
-    };
+    return mockUpdate(want);
+  },
+  async InstallUpdate() {
+    // Pretend: a download that takes a few seconds, then the install step.
+    const total = 20 * 1024 * 1024;
+    let done = 0;
+    const iv = window.setInterval(() => {
+      done = Math.min(total, done + total / 12);
+      emit("update:state", { phase: "downloading", done, total });
+      if (done >= total) {
+        window.clearInterval(iv);
+        emit("update:state", { phase: "installing", done, total });
+      }
+    }, 300);
   },
   async DismissUpdate(_version: string) {},
   async RemoteHome(id: number) {
@@ -641,6 +648,10 @@ export function installMock() {
 
   for (const t of state.transfers) if (t.state === "active") startSim(t);
 
+  if (new URLSearchParams(location.search).get("update") === "1") {
+    window.setTimeout(() => emit("update:available", mockUpdate(true)), 900);
+  }
+
   // Seed the session log once the app has subscribed: connection state,
   // then "in flight" lines for the running transfers.
   window.setTimeout(() => {
@@ -672,4 +683,31 @@ export function installMock() {
     },
   };
   console.info("[mock] warpseed mock backend installed — window.__wsMock");
+}
+
+function mockUpdate(available: boolean) {
+  return {
+    current: "1.3.0",
+    latest: available ? "1.3.1" : "1.3.0",
+    url: "https://github.com/cerkie/warpseed/releases/tag/v1.3.1",
+    available,
+    dismissed: false,
+    name: "warpseed 1.3.1",
+    published: new Date(Date.now() - 86400000).toISOString(),
+    canInstall: true,
+    installKind: "installer" as const,
+    notes: [
+      "warpseed 1.3.1 — a calmer queue, and safer deleting",
+      "",
+      "## Fixed",
+      "",
+      "- **Queue percentages are per file.** A file that had not started yet could show a leftover percentage.",
+      "- **Delete could hit the wrong thing.** F6, Delete and F8 only act when focus is in the pane.",
+      "",
+      "## Changed",
+      "",
+      "- **A folder is one row in the queue.** Click it to see the files.",
+      "- Dropping into a folder uses the first `30%` of the pane as the pane's own folder.",
+    ].join("\n"),
+  };
 }

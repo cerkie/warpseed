@@ -88,3 +88,21 @@ func TestDropWatchSeesNewFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestOutsideBy(t *testing.T) {
+	r := rect{Left: 100, Top: 100, Right: 500, Bottom: 400}
+	for _, c := range []struct {
+		p    point
+		want int32
+	}{
+		{point{100, 100}, 0}, // on the corner is inside
+		{point{300, 250}, 0},
+		{point{90, 250}, 10},
+		{point{300, 430}, 30},
+		{point{540, 450}, 50}, // the larger of the two distances
+	} {
+		if got := outsideBy(c.p, r); got != c.want {
+			t.Errorf("outsideBy(%v) = %d, want %d", c.p, got, c.want)
+		}
+	}
+}

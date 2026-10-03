@@ -677,3 +677,58 @@ button.trow__icon {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* The strip's one line of status: problems are coloured words, not pills. */
+.dock__flag--held {
+  color: var(--state-paused);
+}
+.dock__flag--failed {
+  color: var(--state-error);
+}
+.dock__flag--paused {
+  color: var(--text-dim);
+}
+
+/* A folder row, its expanded children, and the "+N more" fold. */
+.trow--group {
+  font-weight: 500;
+  cursor: pointer;
+}
+.trow--group .trow__name {
+  color: var(--text);
+}
+.trow__sub {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.trow__folder {
+  vertical-align: -1px;
+  color: var(--text-dim);
+}
+.trow__caret {
+  transition: transform var(--dur-instant);
+}
+.trow__caret--open {
+  transform: rotate(90deg);
+}
+.trow--child {
+  margin-left: calc(var(--sp-2) + 18px);
+  opacity: 0.92;
+}
+.trow--more {
+  display: flex;
+  justify-content: center;
+}
+.trow__morebtn {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.trow__morebtn:hover {
+  color: var(--text);
+}
+.trow--child .trow__route {
+  visibility: hidden; /* the folder row already says where these are going */
+}

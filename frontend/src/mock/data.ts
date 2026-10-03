@@ -388,6 +388,31 @@ export const TRANSFERS: Transfer[] = [
   },
 ];
 
+// A folder queued as one batch: some files done, one running, the rest waiting.
+for (let i = 1; i <= 9; i++) {
+  const ep = `Northern.Lights.S01E0${i}.1080p.WEB-DL.mkv`;
+  const done = i <= 3;
+  const running = i === 4;
+  TRANSFERS.push({
+    id: 200 + i,
+    siteId: 1,
+    engine: "sftpfast",
+    direction: "download",
+    src: `/home/seedling/downloads/Northern.Lights.S01/${ep}`,
+    dst: `D:\Media\Incoming\Northern.Lights.S01\${ep}`,
+    size: Math.round(2.1 * GiB),
+    state: done ? "completed" : running ? "active" : "pending",
+    priority: 0,
+    bytesDone: done ? Math.round(2.1 * GiB) : running ? Math.round(0.9 * GiB) : 0,
+    attempt: 1,
+    nextRetryAt: null,
+    error: null,
+    createdAt: iso(20 - i),
+    updatedAt: iso(0),
+    batch: "1790000000000000000|Northern.Lights.S01",
+  });
+}
+
 export const SIM: Record<number, Sim> = {
   101: { lanes: 8, laneRate: Math.round(4.1 * MiB) }, // ≈ 33 MiB/s
   102: { lanes: 4, laneRate: Math.round(2.3 * MiB) }, // ≈ 9 MiB/s

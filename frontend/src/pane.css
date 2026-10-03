@@ -633,3 +633,9 @@
   outline-offset: -2px;
   background: var(--accent-glow);
 }
+
+/* While a drag is over a pane, the status line says where a drop would land. */
+.pane__droptarget {
+  color: var(--accent);
+  font-weight: 600;
+}

@@ -2,7 +2,7 @@
    Transfers are a live event-driven mirror of the queue (refetched on
    queue:changed; progress overlaid from transfer:progress events). */
 import { create } from "zustand";
-import { transfersList, type PaneSource, type Site, type Transfer } from "./ipc";
+import { transfersList, type PaneSource, type Site, type Transfer, type UpdateInfo } from "./ipc";
 import { getPref, setPref } from "./lib/prefs";
 
 function readPaneCount(): 2 | 3 {
@@ -70,6 +70,10 @@ interface UiState {
   connStates: Record<number, string>;
   paletteOpen: boolean;
   quickConnect: { open: boolean; side: PaneSide };
+  /** The newest release when it is newer than this build (null otherwise), and
+      whether its "what is new" window is open. */
+  update: UpdateInfo | null;
+  updateOpen: boolean;
   transfers: Transfer[];
   progress: Record<number, ProgressSample>;
   queueOpen: boolean;
@@ -94,6 +98,8 @@ interface UiState {
   setConnState: (siteId: number, state: string) => void;
   setPaletteOpen: (open: boolean) => void;
   setQuickConnect: (open: boolean, side?: PaneSide) => void;
+  setUpdate: (u: UpdateInfo | null) => void;
+  setUpdateOpen: (open: boolean) => void;
   /** Refetch the queue list — the only write path for it; stale or
       superseded responses are dropped. */
   refreshTransfers: () => Promise<void>;
@@ -132,6 +138,8 @@ export const useUiStore = create<UiState>((set) => ({
   connStates: {},
   paletteOpen: false,
   quickConnect: { open: false, side: 1 },
+  update: null,
+  updateOpen: false,
   transfers: [],
   progress: {},
   queueOpen: false,
@@ -168,6 +176,8 @@ export const useUiStore = create<UiState>((set) => ({
   setConnState: (siteId, state) =>
     set((s) => ({ connStates: { ...s.connStates, [siteId]: state } })),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+  setUpdate: (update) => set({ update }),
+  setUpdateOpen: (updateOpen) => set({ updateOpen }),
   setQuickConnect: (open, side) =>
     set((s) => ({ quickConnect: { open, side: side ?? s.quickConnect.side } })),
   refreshTransfers: () => {
@@ -185,7 +195,15 @@ export const useUiStore = create<UiState>((set) => ({
               return p ? { ...t, state: p.state, error: p.error ?? t.error } : t;
             })
           : list;
-        set({ transfers });
+        // Progress is only meaningful for rows that are running or paused; ids are
+        // recycled by the database, so a leftover entry would haunt a new transfer.
+        set((s) => {
+          const progress: typeof s.progress = {};
+          for (const t of transfers) {
+            if ((t.state === "active" || t.state === "paused") && s.progress[t.id]) progress[t.id] = s.progress[t.id];
+          }
+          return { transfers, progress };
+        });
       })
       .catch(() => undefined);
   },

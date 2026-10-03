@@ -193,4 +193,11 @@ var migrations = []string{
 		finished_at TEXT NOT NULL
 	);
 	`,
+
+	// 016 — batches. Files queued from one folder share a batch ("<id>|<folder
+	// name>"), so the queue can show the folder as a single row. Empty for a
+	// file queued on its own.
+	`
+	ALTER TABLE transfers ADD COLUMN batch TEXT NOT NULL DEFAULT '';
+	`,
 }

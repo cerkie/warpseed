@@ -38,8 +38,8 @@ once-per-run check with GitHub for a newer release. The update check sends no
 identifiers and no usage data — it asks a public page what the latest version
 is, and nothing about you goes with the question. Turn it off in
 **Settings → About** if you would rather it did not happen at all. There is
-still no telemetry of any kind, and warpseed never downloads or replaces
-itself: if there is a new version, it tells you and opens the release page.
+still no telemetry of any kind. warpseed downloads an update only when you press
+**Install & restart** (see [Updating](#updating)).
 
 1. Download `warpseed.exe` from the
    [latest release](https://github.com/ZyraLabs/warpseed/releases/latest).
@@ -97,6 +97,26 @@ the file, or drag the file onto either window (a dashed strip says so).
 - A PuTTY `.ppk` key cannot be read by warpseed. Those sites are imported
   without the key; convert it to an OpenSSH key and pick it when you edit the
   site.
+
+### Updating
+
+When there is a newer release, a strip appears across the top ("warpseed 1.3.1
+is available") and a quiet "Update available" stays in the status bar. **What's
+new** shows the release notes. **Install & restart** downloads the release,
+checks it against the SHA-256 checksum GitHub publishes for the file, and
+restarts into the new version. Running transfers stop and resume after the
+restart. Nothing is downloaded until you press the button.
+
+- An installed copy runs the release's installer silently, into the folder it
+  already lives in (Windows asks for permission, as for any installer).
+- A portable `warpseed.exe` is replaced in place, so its folder must be one you
+  can write to. The old file is removed on the next start.
+- If the release has no published checksum, or warpseed can't write where it
+  lives, it falls back to opening the release page.
+- If an install fails, warpseed starts again as the version you had and says
+  why.
+
+**Settings → About** has **Check now** and a switch for the check at startup.
 
 ### Host key check
 
@@ -188,8 +208,10 @@ Transfers act on the marks if there are any, otherwise on the cursor row.
 
 You can also **drag files from one pane to the other**, which queues the
 same transfer: drag from the site to This PC to download, the other way to
-upload. Drop on the pane to use the folder it is showing, or drop straight
-onto a folder row to put the files in that folder. Dragging a row that is
+upload. Drop on the pane to use the folder it is showing. To put the files in a
+folder instead, carry the file past the first 30% of the pane (counted from the
+edge it came in by); the folder under the pointer lights up instead of the pane, and the status
+line says where it will land. Dragging a row that is
 not part of your selection drags just that row.
 
 Dragging *within* one pane does nothing, and neither does dragging between
@@ -240,8 +262,16 @@ asks first, and says how many of those rows hold part-transferred data;
 Cancel selected asks only when data would be lost.
 
 **States:** queued · active · paused · completed · failed · cancelled. Failed rows
-show a plain-language reason and a **retry** button. Completed rows stay
-for the session so you can audit them; **Clear done** purges them.
+show a plain-language reason and a **retry** button. Completed transfers leave
+the queue list; Deck and Activity still show them for the session, and
+**Clear done** forgets them (they move to Transfer history).
+
+**Folders.** Files queued from one folder show as a single row with the folder
+name, how many are done, and a combined progress bar. Click it to see the
+files; its buttons pause, resume or cancel the whole folder. A long wait of
+single files shows the first ten, then "+N more waiting" (click to show all).
+The line on the strip is plain text: active and queued counts, then anything
+needing a decision or failed.
 
 When anything has failed, two more buttons appear at the left of the queue
 toolbar — one unplugged drive or one hour of a server refusing logins fails

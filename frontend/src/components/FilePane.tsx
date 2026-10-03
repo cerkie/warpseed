@@ -37,7 +37,8 @@ import {
 } from "../lib/path";
 import { recentPaths, rememberPath } from "../lib/recents";
 import { otherSide, useUiStore, type PaneSide } from "../store";
-import { armDragOut } from "../lib/dragOut";
+import { activeHandoff, armDragOut } from "../lib/dragOut";
+import { entryEdgeOf, inFolderZone } from "../lib/dropZone";
 import Breadcrumb from "./Breadcrumb";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import DirTree from "./DirTree";
@@ -183,6 +184,17 @@ function sepFor(p: string, remote: boolean): string {
     can never collide with one. */
 const PANE_DIR = "\u0000pane";
 
+/** The pane a warpseed drag started in (null when none is running). Dragover
+    cannot read the drag's data, so this is how a pane knows which side the drag
+    came from. */
+let dragFromSide: PaneSide | null = null;
+
+/** Whether a drag over a folder row is aimed at the folder. */
+function overFolderZone(ev: React.DragEvent, destSide: PaneSide): boolean {
+  return inFolderZone(ev.clientX, (ev.currentTarget as HTMLElement).getBoundingClientRect(), destSide, dragFromSide);
+}
+
+
 export default function FilePane({ side }: { side: PaneSide }) {
   const { source, path } = useUiStore((s) => s.panes[side]);
   const isActive = useUiStore((s) => s.activePane === side);
@@ -199,6 +211,10 @@ export default function FilePane({ side }: { side: PaneSide }) {
   const { sort, toggle: toggleSort } = usePaneSort();
   const { style: colStyle, startResize } = useColumnWidths(PANE_COLUMNS, "ui.pane_columns");
   const [cursor, setCursor] = useState(0);
+  // The cursor row is only drawn (and only acted on) once the user has put it
+  // somewhere: a click, an arrow key, or arriving on a folder they came from.
+  // A freshly opened folder highlights nothing.
+  const [cursorShown, setCursorShown] = useState(false);
   const [marks, setMarks] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<string | null>(null);
   const [editReq, setEditReq] = useState(0);
@@ -258,6 +274,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
   const moveCursor = useCallback(
     (n: number) => {
       setCursor(n);
+      setCursorShown(true);
       virtualizer.scrollToIndex(n);
     },
     [virtualizer],
@@ -349,6 +366,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
     setTaHint("");
     const idx = want ? entries.findIndex((x) => x.name === want) : -1;
     setCursor(idx >= 0 ? idx : 0);
+    setCursorShown(idx >= 0);
+    setCursorShown(idx >= 0);
     anchor.current = idx >= 0 ? idx : 0;
     if (idx >= 0) virtualizer.scrollToIndex(idx, { align: "center" });
     else scrollRef.current?.scrollTo({ top: 0 });
@@ -603,6 +622,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
       // would be a poor trade for the consistency.
       const fromMarks = marks.has(entry.name);
       const picked = fromMarks ? entries.filter((e) => marks.has(e.name)) : [entry];
+      dragFromSide = side;
       const payload: DragPayload = {
         side,
         fromMarks,
@@ -620,7 +640,9 @@ export default function FilePane({ side }: { side: PaneSide }) {
       // files can be dropped in Explorer or any other file manager. Server
       // folders and files both work: the app queues the downloads.
       armDragOut(
+        side,
         payload.siteId,
+        payload.base,
         picked
           .map((e) => ({ path: payload.base + e.name, name: e.name, size: e.size, modTime: e.modTime, isDir: e.isDir })),
       );
@@ -649,6 +671,48 @@ export default function FilePane({ side }: { side: PaneSide }) {
       for (const ev of ["dragend", "drop", "dragstart"]) window.removeEventListener(ev, clear);
     };
   }, []);
+  // The drag is over: forget where it came from. Not on dragstart, which runs
+  // after the pane that started it has said so.
+  useEffect(() => {
+    const reset = () => {
+      // A drag handed to Windows ends the page's own drag, but it is still the
+      // same drag: its side is needed until the native drag is over.
+      if (!activeHandoff()) dragFromSide = null;
+    };
+    window.addEventListener("dragend", reset);
+    window.addEventListener("drop", reset);
+    window.addEventListener("ws:handoffend", reset);
+    return () => {
+      window.removeEventListener("dragend", reset);
+      window.removeEventListener("drop", reset);
+      window.removeEventListener("ws:handoffend", reset);
+    };
+  }, []);
+
+  // A drag that went out of the window and is running natively still shows its
+  // indicators when it comes back: Go streams the pointer's position and this
+  // pane works out, as for an in-window drag, what a drop here would do.
+  useEffect(() => {
+    const onHover = (e: Event) => {
+      const pos = (e as CustomEvent<{ x: number; y: number } | null>).detail;
+      const h = activeHandoff();
+      const el = pos && h ? document.elementFromPoint(pos.x, pos.y) : null;
+      const here = el?.closest("[data-pane]")?.getAttribute("data-pane") === String(side);
+      // A drop is offered between a pane on this PC and one on a server only.
+      const offered = here && h && h.side !== side && (source === "local") !== (h.siteId === null);
+      if (!pos || !h || !offered) {
+        setDropOn(null);
+        setHint(null);
+        return;
+      }
+      const row = el?.closest<HTMLElement>("[data-dir]");
+      const aimed = row && inFolderZone(pos.x, row.getBoundingClientRect(), side, h.side);
+      setDropOn(aimed ? row.dataset.dir ?? PANE_DIR : PANE_DIR);
+      setHint("Copy");
+    };
+    window.addEventListener("ws:handoffhover", onHover);
+    return () => window.removeEventListener("ws:handoffhover", onHover);
+  }, [side, source]);
   /** What dropping this drag here would do, from the types list and the
       modifier keys alone (dragover may read nothing else). A drag from the
       other kind of pane is a copy, or a move with Shift; a drag from this
@@ -698,14 +762,20 @@ export default function FilePane({ side }: { side: PaneSide }) {
       }
       ev.preventDefault();
       ev.dataTransfer.dropEffect = kind === "move" ? "move" : "copy";
-      setDropOn(dir);
+      // A folder row is only the target while the pointer is over its icon or
+      // name. The empty stretch of the row (and the size and date columns) counts
+      // as the pane's own folder, so a file is not filed into a folder by
+      // accident while crossing the list.
+      setDropOn(dir === PANE_DIR || overFolderZone(ev, side) ? dir : PANE_DIR);
     },
-    [acceptType, dragType, dropKind],
+    [acceptType, dragType, dropKind, side],
   );
 
 
   const doDrop = useCallback(
-    (ev: React.DragEvent, dir: string) => {
+    (ev: React.DragEvent, aimed: string) => {
+      // A folder row only counts if the pointer is over its name (see overDrop).
+      const dir = aimed !== PANE_DIR && !overFolderZone(ev, side) ? PANE_DIR : aimed;
       const kind = dropKind(ev);
       if (!kind) return;
       ev.preventDefault();
@@ -822,8 +892,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
 
   const selection = useCallback((): FsEntry[] => {
     if (marks.size) return entries.filter((e) => marks.has(e.name));
-    return entries[cursor] ? [entries[cursor]] : [];
-  }, [marks, entries, cursor]);
+    return cursorShown && entries[cursor] ? [entries[cursor]] : [];
+  }, [marks, entries, cursor, cursorShown]);
 
   // F6: move the selection to the other pane — a rename within one
   // filesystem, or copy-then-delete across the two kinds of pane.
@@ -859,6 +929,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
       const entry = entries[index];
       if (!entry) return;
       setCursor(index);
+      setCursorShown(true);
+      setCursorShown(true);
       if (ev.shiftKey) {
         const a = Math.max(0, Math.min(anchor.current, entries.length - 1));
         const [lo, hi] = index < a ? [index, a] : [a, index];
@@ -1006,6 +1078,12 @@ export default function FilePane({ side }: { side: PaneSide }) {
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLSelectElement ||
         e.target instanceof HTMLTextAreaElement;
+      // Keys that act on files (transfer, move, rename, new folder, delete) only
+      // count when focus is in THIS pane. The handler is on the window, so
+      // without this a Delete pressed while the queue, a dialog or nothing had
+      // focus would delete whatever the pane had highlighted.
+      const inThisPane =
+        e.target instanceof Element && e.target.closest("[data-pane]")?.getAttribute("data-pane") === String(side);
       if (e.ctrlKey && e.key.toLowerCase() === "l") {
         e.preventDefault();
         setEditReq((n) => n + 1);
@@ -1027,7 +1105,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
         e.preventDefault(); // F5 transfers — never reloads the webview
         if (typeof source === "number") void enqueueItems(selection());
         else void uploadItems(selection());
-      } else if (e.key === "F6" && !inField) {
+      } else if (e.key === "F6" && !inField && inThisPane) {
         e.preventDefault(); // F6 moves the selection to the other pane
         moveSelection();
       } else if (e.ctrlKey && e.key.toLowerCase() === "r") {
@@ -1040,7 +1118,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
       } else if (e.key === "F7" && !inField) {
         e.preventDefault();
         doMkdir();
-      } else if ((e.key === "Delete" || e.key === "F8") && !inField) {
+      } else if ((e.key === "Delete" || e.key === "F8") && !inField && inThisPane) {
         e.preventDefault();
         doDelete(selection());
       }
@@ -1228,7 +1306,14 @@ export default function FilePane({ side }: { side: PaneSide }) {
       return;
     }
     if (!entries.length && ev.key !== "Backspace") return;
-    const e = entries[cursor];
+    const e = cursorShown ? entries[cursor] : undefined;
+    // The first arrow press in a pane that shows no cursor puts it on the first
+    // row, rather than moving off a row nobody could see.
+    if (!cursorShown && ["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(ev.key)) {
+      ev.preventDefault();
+      setCursorShown(true);
+      return;
+    }
     // Page by what is actually on screen: the pane height is user-driven,
     // so a hardcoded 20 rows overshoots on a short window and undershoots
     // on a tall one. The -1 keeps a row of context, as Explorer does.
@@ -1533,6 +1618,15 @@ export default function FilePane({ side }: { side: PaneSide }) {
           role="grid"
           aria-rowcount={entries.length + 1}
           aria-multiselectable="true"
+          // dragenter must be cancelled too, or the cursor flashes "not allowed"
+          // for a moment each time the pointer crosses into another row.
+          onDragEnter={(ev) => {
+            const types = ev.dataTransfer.types;
+            const kind = types.includes(acceptType) || types.includes(dragType) ? dropKind(ev) : null;
+            if (!kind) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = kind === "move" ? "move" : "copy";
+          }}
           onDragOver={(ev) => overDrop(ev, PANE_DIR)}
           onDragLeave={(ev) => {
             // Only when the pointer has actually left the pane, not on the
@@ -1673,7 +1767,7 @@ export default function FilePane({ side }: { side: PaneSide }) {
               const cls = [
                 "row",
                 e.isDir ? "row--dir" : "",
-                vi.index === cursor ? "row--cursor" : "",
+                vi.index === cursor && cursorShown ? "row--cursor" : "",
                 marks.has(e.name) ? "row--marked" : "",
                 dropOn === e.name && e.isDir ? "row--dropinto" : "",
               ]
@@ -1700,6 +1794,8 @@ export default function FilePane({ side }: { side: PaneSide }) {
                     ev.preventDefault();
                     setActivePane(side);
                     setCursor(vi.index);
+                    setCursorShown(true);
+                    setCursorShown(true);
                     // Right-clicking outside the current selection targets
                     // just that row, as every file manager does.
                     if (marks.size && !marks.has(e.name)) setMarks(new Set([e.name]));
@@ -1775,7 +1871,15 @@ export default function FilePane({ side }: { side: PaneSide }) {
       />
 
       <footer className="pane__status">
-        <span>{all.length} items</span>
+        {dropOn !== null ? (
+          <span className="pane__droptarget">
+            {dropOn === PANE_DIR
+              ? `Drop here · ${(nav.listing?.path ?? path).split(/[\\/]/).filter(Boolean).pop() ?? "this folder"}`
+              : `Drop into · ${dropOn}`}
+          </span>
+        ) : (
+          <span>{all.length} items</span>
+        )}
         {taHint && <span className="pane__typeahead">{taHint}</span>}
         {marks.size > 0 && (
           <span className="marked">

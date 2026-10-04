@@ -466,6 +466,8 @@ Open with **Ctrl+,** or the gear icon.
 Every setting is a row in a card: its name on the left, one control on the
 right. A small **i** next to a name explains it on hover.
 
+![Transfers settings](screenshots/settings-transfers.png)
+
 **Connections** — these are connection budgets, not file counts. A Hyperlane
 file spends one connection per lane, so the budget decides how many files
 run at once: 8 connections runs two 4-lane files, and a budget below the

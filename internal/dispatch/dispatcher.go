@@ -85,6 +85,10 @@ type Dispatcher struct {
 	// point of it for someone who wants to launch warpseed WITHOUT last
 	// night's queue springing back to life.
 	paused atomic.Bool
+	// windowWaiting is true while the "only transfer between these hours"
+	// setting is holding the queue back. Held apart from paused: the user did not
+	// pause anything, and the hours opening again needs no click.
+	windowWaiting atomic.Bool
 	// stopping is set by Stop so a transfer cut off by shutdown is requeued
 	// clean rather than classified as an error and put on the retry ladder.
 	// The pump gates on it too: a requeued row must not be re-claimed and
@@ -129,6 +133,7 @@ type Dispatcher struct {
 
 	limMu       sync.Mutex
 	limiter     *rate.Limiter // nil = unthrottled
+	siteLims    map[int64]*rate.Limiter // per-site speed limits, shared by that site's transfers
 	windowBytes int64         // atomic: bytes moved since last tick
 	observedMax float64       // best aggregate rate seen (bytes/sec)
 }
@@ -256,14 +261,83 @@ func (d *Dispatcher) refreshLimiter() {
 	}
 }
 
+// siteLimiter returns the speed limiter for a site that has its own limit, or
+// nil. Transfers of one site share it, so the limit is for the site as a whole.
+// It is looked up when a transfer starts; a changed limit reaches the running
+// ones through the shared limiter the next time any of them starts.
+func (d *Dispatcher) siteLimiter(siteID int64) *rate.Limiter {
+	site, err := d.store.SiteByID(siteID)
+	d.limMu.Lock()
+	defer d.limMu.Unlock()
+	if err != nil || site.BandwidthLimit <= 0 {
+		delete(d.siteLims, siteID)
+		return nil
+	}
+	if d.siteLims == nil {
+		d.siteLims = make(map[int64]*rate.Limiter)
+	}
+	lim := rate.Limit(site.BandwidthLimit)
+	if cur := d.siteLims[siteID]; cur != nil {
+		if cur.Limit() != lim {
+			cur.SetLimit(lim)
+		}
+		return cur
+	}
+	l := rate.NewLimiter(lim, limiterBurst)
+	d.siteLims[siteID] = l
+	return l
+}
+
+// charge makes a transfer wait until lim allows delta more bytes.
+//
+// Every byte is charged: a single chunked read can exceed the burst size, and
+// clamping (rather than looping) would let the excess through untracked and
+// blow past the user's limit.
+func charge(ctx context.Context, lim *rate.Limiter, delta int64) {
+	for owed := delta; owed > 0; {
+		n := owed
+		if n > limiterBurst {
+			n = limiterBurst
+		}
+		if err := lim.WaitN(ctx, int(n)); err != nil {
+			return // cancelled: the copy is stopping anyway
+		}
+		owed -= n
+	}
+}
+
 func (d *Dispatcher) currentLimiter() *rate.Limiter {
 	d.limMu.Lock()
 	defer d.limMu.Unlock()
 	return d.limiter
 }
 
+// outsideWindow reports whether the "only transfer between these hours"
+// setting says nothing new may start now. Transfers already running are left
+// to finish.
+func (d *Dispatcher) outsideWindow() bool {
+	if d.store.Setting("queue.window_on", "0") != "1" {
+		return false
+	}
+	from, to := d.store.SettingInt("queue.window_from", 1), d.store.SettingInt("queue.window_to", 7)
+	if from == to {
+		return false // an empty window would stop the queue for good; read it as no limit
+	}
+	return !inScheduleWindow(time.Now().Hour(), from, to)
+}
+
+// WindowWaiting reports whether the transfer hours are holding the queue back.
+func (d *Dispatcher) WindowWaiting() bool { return d.windowWaiting.Load() }
+
 func (d *Dispatcher) pump(ctx context.Context) {
 	if d.paused.Load() || d.stopping.Load() {
+		return
+	}
+	waiting := d.outsideWindow()
+	if d.windowWaiting.Swap(waiting) != waiting {
+		d.sink.Emit("queue:window", map[string]any{"waiting": waiting})
+	}
+	if waiting {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -749,21 +823,13 @@ func (d *Dispatcher) runTransfer(ctx context.Context, t queue.Transfer, streams 
 	}
 
 	// progress is called from several goroutines in chunked mode.
+	siteLim := d.siteLimiter(t.SiteID)
 	progress := func(delta int64) {
 		if lim := d.currentLimiter(); lim != nil {
-			// Charge every byte: a single chunked read can exceed the burst
-			// size, and clamping (rather than looping) would let the excess
-			// through untracked and blow past the user's limit.
-			for owed := delta; owed > 0; {
-				n := owed
-				if n > limiterBurst {
-					n = limiterBurst
-				}
-				if err := lim.WaitN(ctx, int(n)); err != nil {
-					break // cancelled: the copy is stopping anyway
-				}
-				owed -= n
-			}
+			charge(ctx, lim, delta)
+		}
+		if siteLim != nil {
+			charge(ctx, siteLim, delta)
 		}
 		atomic.AddInt64(&d.windowBytes, delta)
 
@@ -914,6 +980,12 @@ func (d *Dispatcher) runTransfer(ctx context.Context, t queue.Transfer, streams 
 	progMu.Unlock()
 	if uerr := d.store.UpdateTransferProgress(t.ID, final); uerr != nil {
 		log.Printf("dispatch: final progress %d: %v", t.ID, uerr)
+	}
+
+	if err == nil {
+		if verr := d.verifyCopy(ctx, t, first(clients)); verr != nil {
+			err = verr
+		}
 	}
 
 	if err == nil {
@@ -1575,4 +1647,46 @@ func inScheduleWindow(hour, from, to int) bool {
 	default:
 		return hour >= from || hour < to
 	}
+}
+
+// errChecksumMismatch is why a verified transfer failed. The wording avoids the
+// words core.Classify treats as retryable, so the row fails rather than looping.
+var errChecksumMismatch = errors.New("the copy does not match the original (checksum mismatch)")
+
+// verifyCopy compares the finished file with the other side's copy when the
+// user has turned "Check files after transfer" on. It only ever fails on a
+// proven mismatch: a server that cannot hash, or any trouble while hashing,
+// means "not checked" and the transfer stands. It runs before a move deletes
+// its source, so a bad copy can never cost the original.
+func (d *Dispatcher) verifyCopy(ctx context.Context, t queue.Transfer, c *sftpfast.Client) error {
+	if c == nil || d.store.Setting("transfers.verify", "0") != "1" || ctx.Err() != nil {
+		return nil
+	}
+	local, remote := t.Dst, t.Src
+	if t.Direction == "upload" {
+		local, remote = t.Src, t.Dst
+	}
+	want, err := c.RemoteSHA256(ctx, remote)
+	if err != nil {
+		applog.Debugf("verify %d: not checked: %v", t.ID, err)
+		return nil
+	}
+	got, err := sftpfast.LocalSHA256(ctx, local)
+	if err != nil {
+		applog.Debugf("verify %d: not checked: %v", t.ID, err)
+		return nil
+	}
+	if got == want {
+		return nil
+	}
+	log.Printf("verify %d: checksum mismatch for %s", t.ID, local)
+	if t.Direction != "upload" {
+		// Our own output, proven wrong: leaving it under its real name would
+		// pass for the file. The user retries to fetch it again.
+		if rerr := os.Remove(local); rerr != nil {
+			log.Printf("verify %d: remove bad copy: %v", t.ID, rerr)
+		}
+		return fmt.Errorf("%w; the downloaded copy was removed, retry to download it again", errChecksumMismatch)
+	}
+	return fmt.Errorf("%w; the uploaded copy on the server may be damaged", errChecksumMismatch)
 }

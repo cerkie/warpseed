@@ -30,9 +30,10 @@ export default function HostKeyDialog() {
           First connection to {current.host}
         </h2>
         <p>
-          The server presented a <b>{current.algo === "tls-cert" ? "TLS certificate" : `${current.algo} key`}</b> warpseed hasn’t seen before. Verify
-          this fingerprint against one your provider published, then trust it to pin it for
-          this site.
+          This is the first time warpseed has seen this server&rsquo;s{" "}
+          <b>{current.algo === "tls-cert" ? "TLS certificate" : `${current.algo} key`}</b>. Check the
+          fingerprint below against the one your provider publishes. If it matches, trust it and
+          warpseed will remember it for this site, and warn you if it ever changes.
         </p>
         <code className="fingerprint">{current.fingerprint}</code>
         <div className="dialog__actions">

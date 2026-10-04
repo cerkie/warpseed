@@ -120,6 +120,11 @@ interface UiState {
   pushSessionEvent: (kind: SessionEvent["kind"], text: string) => void;
 }
 
+// Progress samples waiting to be applied together (see applyProgress).
+const pendingProgress = new Map<number, { bytes: number; chunks?: number[] }>();
+let progressTimer: number | null = null;
+const PROGRESS_BATCH_MS = 250;
+
 // Warnings the user has silenced for this run. Module scope, not persisted:
 // see askConfirm.
 const suppressed = new Set<string>();
@@ -207,31 +212,45 @@ export const useUiStore = create<UiState>((set) => ({
       })
       .catch(() => undefined);
   },
-  applyProgress: (id, bytes, _size, chunks) =>
-    set((s) => {
-      const now = performance.now();
-      const prev = s.progress[id];
-      let rate = prev?.rate ?? 0;
-      // The average counts from the first sample, or from the first one after
-      // a pause (a gap of several seconds), so a paused transfer does not
-      // drag its own average down.
-      let t0 = prev?.t0 ?? now;
-      let b0 = prev?.b0 ?? bytes;
-      if (prev && now - prev.at > 5000) {
-        t0 = now;
-        b0 = bytes;
-      }
-      if (prev && now > prev.at) {
-        const inst = ((bytes - prev.bytes) * 1000) / (now - prev.at);
-        rate = prev.rate === 0 ? inst : prev.rate * 0.7 + inst * 0.3; // EMA smoothing
-        if (getPref("ui.speed_mode") === "average" && now - t0 > 2000) {
-          rate = ((bytes - b0) * 1000) / (now - t0);
+  // Progress arrives per transfer, several times a second each. Applying every
+  // one on its own re-rendered the queue for each, so with a few transfers
+  // running it redrew dozens of times a second. They are collected and applied
+  // together, about four times a second whatever the number of transfers.
+  applyProgress: (id, bytes, _size, chunks) => {
+    pendingProgress.set(id, { bytes, chunks });
+    if (progressTimer !== null) return;
+    progressTimer = window.setTimeout(() => {
+      progressTimer = null;
+      const batch = [...pendingProgress];
+      pendingProgress.clear();
+      set((s) => {
+        const now = performance.now();
+        const progress = { ...s.progress };
+        for (const [tid, { bytes: b, chunks: c }] of batch) {
+          const prev = progress[tid];
+          let rate = prev?.rate ?? 0;
+          // The average counts from the first sample, or from the first one
+          // after a pause (a gap of several seconds), so a paused transfer
+          // does not drag its own average down.
+          let t0 = prev?.t0 ?? now;
+          let b0 = prev?.b0 ?? b;
+          if (prev && now - prev.at > 5000) {
+            t0 = now;
+            b0 = b;
+          }
+          if (prev && now > prev.at) {
+            const inst = ((b - prev.bytes) * 1000) / (now - prev.at);
+            rate = prev.rate === 0 ? inst : prev.rate * 0.7 + inst * 0.3; // EMA smoothing
+            if (getPref("ui.speed_mode") === "average" && now - t0 > 2000) {
+              rate = ((b - b0) * 1000) / (now - t0);
+            }
+          }
+          progress[tid] = { bytes: b, at: now, rate, t0, b0, chunks: c ?? prev?.chunks };
         }
-      }
-      return {
-        progress: { ...s.progress, [id]: { bytes, at: now, rate, t0, b0, chunks: chunks ?? prev?.chunks } },
-      };
-    }),
+        return { progress };
+      });
+    }, PROGRESS_BATCH_MS);
+  },
   patchTransferState: (id, state, error) => {
     patches.set(id, { state, error, ticket: refreshTicket });
     set((s) => ({

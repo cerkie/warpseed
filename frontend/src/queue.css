@@ -163,6 +163,27 @@
   background: var(--surface-card);
   z-index: 1;
 }
+.dock__filter {
+  width: 150px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  padding: 0 var(--sp-2);
+}
+.dock__filter:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.dock__filtercount {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
 .dock__header .grow {
   flex: 1;
 }
@@ -265,13 +286,13 @@
   display: grid;
   grid-template-columns:
     16px
-    var(--col-name, 200px)
-    var(--col-route, 170px)
+    var(--col-name, 320px)
+    var(--col-route, 200px)
     var(--col-size, 84px)
     var(--col-rate, 88px)
     var(--col-pct, 52px)
     minmax(80px, 1fr)
-    auto;
+    84px; /* room for three buttons, so every row's bar ends in the same place */
   gap: var(--sp-2);
   align-items: center;
   height: 34px;
@@ -322,30 +343,78 @@
 }
 .thead {
   position: relative;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Not hidden: the resize grip straddles the cell's right edge, and clipping
+     left only a 2px sliver of it to grab (and hid the divider entirely). The
+     sort button ellipsizes its own label. */
+  overflow: visible;
   white-space: nowrap;
   user-select: none;
 }
 .thead__grip {
+  /* An 8px strip centred in the gap between this column and the next, so the
+     divider sits the same distance from both neighbours. */
   position: absolute;
   top: -4px;
   bottom: -4px;
-  right: calc(var(--sp-2) / -2 - 1px);
-  width: 7px;
+  right: calc(var(--sp-2) / -2 - 4px);
+  width: 8px;
   cursor: col-resize;
 }
 .thead__grip::after {
   content: "";
   position: absolute;
-  inset: 4px auto 4px 3px;
+  left: 3px;
+  top: 50%;
+  height: 14px;
+  margin-top: -7px;
   width: 1px;
   background: var(--border-strong);
-  opacity: 0;
-  transition: opacity var(--dur-instant);
+  opacity: 0.6; /* always there, so it reads as a column divider you can drag */
+  transition: opacity var(--dur-instant), background var(--dur-instant);
 }
 .thead__grip:hover::after {
   opacity: 1;
+  background: var(--accent);
+}
+
+/* Numbers sit on the right of their columns, so their headings do too. The
+   sort arrow goes before the label so the text, not the arrow, lines up. */
+.thead--size,
+.thead--rate,
+.thead--pct {
+  text-align: right;
+}
+.thead--size .thead__sort,
+.thead--rate .thead__sort,
+.thead--pct .thead__sort {
+  flex-direction: row-reverse;
+}
+
+/* The grip above the open list: drag it to make the queue taller. */
+.dock__grip {
+  height: 7px;
+  margin-bottom: -7px; /* sits over the top edge of the list, taking no room */
+  position: relative;
+  z-index: 3;
+  cursor: row-resize;
+  border-top: 1px solid var(--border);
+}
+.dock__grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  width: 36px;
+  height: 3px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  opacity: 0.5;
+  transition: opacity var(--dur-instant), background var(--dur-instant);
+}
+.dock__grip:hover::after {
+  opacity: 1;
+  background: var(--accent);
 }
 
 /* Sortable queue headings: plain-text buttons that inherit the header's
@@ -552,6 +621,7 @@ button.trow__icon {
 }
 .trow__actions {
   display: flex;
+  justify-content: flex-end;
   gap: 4px;
   opacity: 0.55;
 }
@@ -712,8 +782,12 @@ button.trow__icon {
   transform: rotate(90deg);
 }
 .trow--child {
-  margin-left: calc(var(--sp-2) + 18px);
   opacity: 0.92;
+}
+/* Indent the name only: moving the whole row would push every column out of
+   line with its heading. */
+.trow--child .trow__name {
+  padding-left: 18px;
 }
 .trow--more {
   display: flex;

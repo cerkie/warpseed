@@ -9,6 +9,7 @@ import { friendlyError } from "../lib/errors";
 import { askDeleteSite } from "../lib/sites";
 import { toast } from "../lib/toast";
 import ImportHint from "./ImportHint";
+import Info from "./Info";
 import { useUiStore } from "../store";
 import { Close, Pencil } from "./Icon";
 import ProtocolField from "./ProtocolField";
@@ -158,14 +159,17 @@ export default function QuickConnect() {
           </div>
           {secretLabel(form) && (
           <div className="field">
-            <label>{secretLabel(form)}</label>
+            <label>
+              {secretLabel(form)}
+              <Info>Saved in Windows Credential Manager, not in warpseed&rsquo;s own files.</Info>
+            </label>
             <input
               type="password"
               value={form.password}
+              placeholder={editing ? "Leave blank to keep the saved one" : ""}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               onKeyDown={(e) => e.key === "Enter" && void saveAndConnect()}
             />
-            <span className="note">{editing ? "leave blank to keep the saved password" : "stored in Windows Credential Manager, never on disk"}</span>
           </div>
           )}
           <AutoConnectField checked={form.autoConnect} onChange={(autoConnect) => setForm({ ...form, autoConnect })} />

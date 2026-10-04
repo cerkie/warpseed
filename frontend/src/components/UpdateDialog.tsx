@@ -54,8 +54,8 @@ export default function UpdateDialog() {
 
         {running > 0 && !busy && (
           <p className="set-note">
-            {running} transfer{running === 1 ? " is" : "s are"} running. They stop when warpseed restarts and carry on
-            from where they were afterwards.
+            {running} transfer{running === 1 ? " is" : "s are"} running. {running === 1 ? "It stops" : "They stop"} while warpseed
+            restarts, then {running === 1 ? "carries" : "carry"} on.
           </p>
         )}
         {state?.phase === "downloading" && (
@@ -70,7 +70,7 @@ export default function UpdateDialog() {
         {state?.phase === "failed" && <div className="form-error">{state.error}</div>}
         {!info.canInstall && (
           <p className="set-note">
-            This release can&rsquo;t be installed from here (it needs a published checksum), so it opens its page.
+            This release can&rsquo;t be installed from here, so the button opens its page instead.
           </p>
         )}
 

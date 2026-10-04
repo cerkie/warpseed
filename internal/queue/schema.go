@@ -200,4 +200,10 @@ var migrations = []string{
 	`
 	ALTER TABLE transfers ADD COLUMN batch TEXT NOT NULL DEFAULT '';
 	`,
+
+	// 017 — a speed limit for one site, in bytes per second (0 = none). It
+	// applies on top of the global limit; whichever is lower wins.
+	`
+	ALTER TABLE sites ADD COLUMN bw_limit INTEGER NOT NULL DEFAULT 0;
+	`,
 }

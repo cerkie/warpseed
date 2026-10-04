@@ -1,3 +1,4 @@
+import Info from "./Info";
 import { useEffect, useState } from "react";
 import {
   ackCloseDialog,
@@ -104,16 +105,14 @@ export default function CloseGuardDialog() {
 
         <p id="closeguard-desc">
           {n === 1
-            ? `Its progress is saved. It is still queued the next time you open warpseed and picks up from the last checkpoint, so at most about ${mb} MB is re-sent.`
-            : `Their progress is saved. They are still queued the next time you open warpseed and each picks up from its last checkpoint, so at most about ${mb} MB per connection is re-sent.`}
-        </p>
-
-        <p>
-          Unfinished transfers keep their data in a placeholder file next to the
-          destination, ending .wspart or .wschunk — on the server for uploads. A
-          .wschunk already shows the final file size but is not finished. Leave
-          these files alone; warpseed needs them to resume. If you later cancel a
-          transfer, delete its placeholder yourself — warpseed leaves it behind.
+            ? `Its progress is saved, and it picks up where it left off next time you open warpseed. At most about ${mb} MB is sent again.`
+            : `Their progress is saved, and they pick up where they left off next time you open warpseed. At most about ${mb} MB per connection is sent again.`}
+          <Info>
+            Unfinished transfers keep their data in a temporary file next to the destination, ending
+            .wspart or .wschunk (on the server for uploads). Leave these files alone, because warpseed
+            needs them to carry on. If you decide not to finish a transfer, delete its temporary file
+            yourself.
+          </Info>
         </p>
 
         {queued > 0 && (

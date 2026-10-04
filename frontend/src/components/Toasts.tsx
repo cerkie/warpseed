@@ -6,6 +6,7 @@ interface Toast {
   id: number;
   kind: "info" | "error" | "success";
   text: string;
+  action?: { label: string; run: () => void };
 }
 
 let nextId = 1;
@@ -17,17 +18,19 @@ export default function Toasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
-    const push = (kind: Toast["kind"], text: string) => {
-      const t = { id: nextId++, kind, text };
+    const push = (kind: Toast["kind"], text: string, ms?: number, action?: Toast["action"]) => {
+      const t = { id: nextId++, kind, text, action };
       setToasts((ts) => [...ts.slice(-2), t]);
       // Errors carry what the user must act on, so they linger.
-      setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), kind === "error" ? 12000 : 5000);
+      setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== t.id)), ms ?? (kind === "error" ? 12000 : 5000));
     };
     const offErr = on<string>("app:error", (msg) => push("error", msg));
     const offInfo = on<string>("app:info", (msg) => push("success", msg));
     const local = (ev: Event) => {
-      const { kind, text } = (ev as CustomEvent<{ kind: Toast["kind"]; text: string }>).detail;
-      push(kind, text);
+      const { kind, text, ms, action } = (
+        ev as CustomEvent<{ kind: Toast["kind"]; text: string; ms?: number; action?: Toast["action"] }>
+      ).detail;
+      push(kind, text, ms, action);
     };
     window.addEventListener("ws:toast", local);
     return () => {
@@ -45,8 +48,8 @@ export default function Toasts() {
           key={t.id}
           className={`toast toast--${t.kind}`}
           role={t.kind === "error" ? "alert" : "status"}
-          title="Click to dismiss"
-          onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}
+          title={t.action ? undefined : "Click to dismiss"}
+          onClick={() => !t.action && setToasts((ts) => ts.filter((x) => x.id !== t.id))}
         >
           <span className="toast__icon">
             {t.kind === "error" ? (
@@ -58,6 +61,17 @@ export default function Toasts() {
             )}
           </span>
           <span className="toast__text">{t.text}</span>
+          {t.action && (
+            <button
+              className="toast__action"
+              onClick={() => {
+                t.action?.run();
+                setToasts((ts) => ts.filter((x) => x.id !== t.id));
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

@@ -7,6 +7,9 @@ import { getSettings, setSetting } from "../ipc";
 
 export type PrefKey =
   | "ui.queue_columns"
+  | "ui.queue_height"
+  | "ui.remember_site_views"
+  | "ui.site_views"
   | "ui.pane_columns"
   | "ui.pane_sort"
   | "ui.pane_split"
@@ -22,6 +25,9 @@ export type PrefKey =
 
 const ALL: PrefKey[] = [
   "ui.queue_columns",
+  "ui.queue_height",
+  "ui.remember_site_views",
+  "ui.site_views",
   "ui.pane_columns",
   "ui.pane_sort",
   "ui.pane_split",
@@ -40,6 +46,9 @@ const ALL: PrefKey[] = [
     away a layout the user tuned. */
 const LEGACY: Record<PrefKey, string> = {
   "ui.queue_columns": "ws-queue-columns",
+  "ui.queue_height": "",
+  "ui.remember_site_views": "",
+  "ui.site_views": "",
   "ui.pane_columns": "ws-pane-columns",
   "ui.pane_sort": "ws-pane-sort",
   // No pre-database name: the tree width arrived after the settings store did.

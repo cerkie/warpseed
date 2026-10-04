@@ -12,7 +12,7 @@ import UpdateBanner from "./components/UpdateBanner";
 import UpdateDialog from "./components/UpdateDialog";
 import HostKeyDialog from "./components/HostKeyDialog";
 import HistoryDialog from "./components/HistoryDialog";
-import { Columns, Heart, Search, Shrink, Sliders, Slipstream } from "./components/Icon";
+import { Cog, Columns, Heart, Search, Shrink, Slipstream } from "./components/Icon";
 import QueueDock from "./components/QueueDock";
 import QuickConnect from "./components/QuickConnect";
 import SettingsDialog from "./components/SettingsDialog";
@@ -21,6 +21,8 @@ import Toasts from "./components/Toasts";
 import { COMPANY, DONATE_URL } from "./lib/branding";
 import { applyTheme, type ThemePref } from "./lib/theme";
 import { getPref, onPrefsHydrated, remoteSide, setPref } from "./lib/prefs";
+import { toast } from "./lib/toast";
+import { startSiteViews } from "./lib/siteViews";
 import { formOf } from "./lib/protocol";
 import { installFileDrop } from "./lib/fileDrop";
 import { initDragOut } from "./lib/dragOut";
@@ -29,6 +31,8 @@ import {
   list,
   localStart,
   notify,
+  rememberWindow,
+  showInFolder,
   on,
   openExternal,
   setMiniMode as ipcSetMiniMode,
@@ -72,6 +76,24 @@ export default function App() {
   const [updateShown, setUpdateShown] = useState(false);
   // Left pane width as a percentage of the browse area; persisted on release.
 
+  // Per-site folder and sort memory; does nothing unless the setting is on.
+  useEffect(() => startSiteViews(), []);
+
+  // Let the app note the window size once it has stopped changing, so the next
+  // launch opens the same way.
+  useEffect(() => {
+    let timer: number | undefined;
+    const onResize = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void rememberWindow().catch(() => undefined), 800);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+
   // A desktop notification when the queue runs dry while the window is not in
   // front, so a long run can be left alone.
   useEffect(() => {
@@ -79,11 +101,13 @@ export default function App() {
     let busy = false;
     let finished = 0;
     let failed = 0;
+    let lastDownloadDir = ""; // where the latest finished download landed
     return useUiStore.subscribe((s) => {
       for (const t of s.transfers) {
         const prev = seen.get(t.id);
         if (prev === t.state) continue;
         seen.set(t.id, t.state);
+        if (prev && t.state === "completed" && t.direction === "download") lastDownloadDir = landingDir(t.dst, t.batch);
         if (prev && t.state === "completed") finished++;
         if (prev && t.state === "failed") failed++;
       }
@@ -96,7 +120,17 @@ export default function App() {
           const text = failed > 0 ? `${finished} finished, ${failed} failed` : `${finished} finished`;
           void notify("warpseed — queue finished", text);
         }
+        // In front, a toast with a way to the files; in the background the
+        // desktop notification above does the telling.
+        if (finished > 0 && lastDownloadDir && document.hasFocus()) {
+          const dir = lastDownloadDir;
+          toast("success", failed > 0 ? `Queue finished: ${finished} done, ${failed} failed` : `Queue finished: ${finished} done`, {
+            ms: 10000,
+            action: { label: "Show in folder", run: () => void showInFolder(dir).catch(() => undefined) },
+          });
+        }
         finished = failed = 0;
+        lastDownloadDir = "";
       }
     });
   }, []);
@@ -428,7 +462,7 @@ export default function App() {
           aria-label="Settings"
           onClick={() => setSettingsOpen(true)}
         >
-          <Sliders size={15} />
+          <Cog size={15} />
         </button>
       </header>
 
@@ -494,6 +528,13 @@ export default function App() {
   );
 }
 
+/** Where a finished download should be shown: the folder it came in, or its own folder. */
+function landingDir(dst: string, batch?: string | null): string {
+  const folder = batch ? batch.slice(batch.indexOf("|") + 1) : "";
+  const cut = folder ? dst.lastIndexOf(folder) : -1;
+  return cut >= 0 ? dst.slice(0, cut + folder.length) : dst.replace(/[\\/][^\\/]*$/, "");
+}
+
 interface SavedPane {
   source: PaneSource;
   path: string;
@@ -513,7 +554,7 @@ function readSavedPanes(): (SavedPane | undefined)[] {
 async function restoreRemote(side: PaneSide, siteId: number, path: string, standIn: string) {
   try {
     if (!(await fetchSites()).some((s) => s.id === siteId)) return;
-    const home = await connectAndHome(siteId, path);
+    const home = await connectAndHome(siteId, path, false);
     const cur = useUiStore.getState().panes[side];
     // The user may have moved on while the connection came up.
     if (cur.source === "local" && cur.path === standIn) useUiStore.getState().setPane(side, siteId, home);

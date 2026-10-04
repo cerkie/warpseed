@@ -30,6 +30,18 @@ const subs = new Set<(s: SortState) => void>();
 let touched = false;
 let hydrationHooked = false;
 
+let sortChanged: ((s: SortState) => void) | null = null;
+/** Told whenever the user changes the sort (not when it is applied for them). */
+export function onPaneSortChanged(cb: (s: SortState) => void) {
+  sortChanged = cb;
+}
+/** Set the sort for every pane without counting it as the user's own choice. */
+export function applyPaneSort(next: SortState) {
+  touched = true;
+  setPref(KEY, JSON.stringify(next));
+  publish(next);
+}
+
 function publish(next: SortState) {
   current = next;
   for (const cb of subs) cb(next);
@@ -66,6 +78,7 @@ export function usePaneSort() {
       prev.key === key ? { key, desc: !prev.desc } : { key, desc: key !== "name" };
     setPref(KEY, JSON.stringify(next));
     publish(next);
+    sortChanged?.(next);
   }, []);
 
   return { sort, toggle };

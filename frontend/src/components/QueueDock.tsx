@@ -12,6 +12,7 @@ import {
   on,
   pauseTransfer,
   queuePaused,
+  queueWindowWaiting,
   resumeTransfer,
   retryFailedTransfers,
   setQueuePaused,
@@ -30,6 +31,8 @@ import {
 import { baseName } from "../lib/path";
 import { confirmCancel } from "../lib/confirmCancel";
 import { toast } from "../lib/toast";
+import { cancelWithUndo } from "../lib/undoCancel";
+import { getPref, setPref } from "../lib/prefs";
 import { useUiStore } from "../store";
 import {
   ArrowUp,
@@ -70,12 +73,15 @@ function eta(bytes: number, size: number, rate: number): string {
     row list, pause/resume/cancel with byte-resume semantics. */
 /** Resizable queue columns; the progress track absorbs the leftover space. */
 const QUEUE_COLUMNS: ColumnSpec[] = [
-  { id: "name", label: "File", min: 90, initial: 200 },
-  { id: "route", label: "Destination", min: 80, initial: 170 },
+  { id: "name", label: "File", min: 90, initial: 320 },
+  { id: "route", label: "Destination", min: 80, initial: 200 },
   { id: "size", label: "Size", min: 56, initial: 84 },
   { id: "rate", label: "Speed / ETA", min: 60, initial: 88 },
   { id: "pct", label: "%", min: 40, initial: 52 },
 ];
+
+/** About the height the open list has by default; the least it can be dragged to. */
+const MIN_QUEUE_H = 140;
 
 /** Trailing window for coalescing queue:changed bursts into one refetch. */
 const REFRESH_COALESCE_MS = 120;
@@ -151,6 +157,7 @@ export default function QueueDock() {
   // Row selection, for cancelling several at once. Local to the dock: no
   // other view acts on it, and it is cleared when the rows it names go.
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [query, setQuery] = useState("");
   const anchor = useRef<number | null>(null);
   // A confirmation raised from the dock takes focus and, on close, drops
   // it on the document body — where the panes' window-level Delete would
@@ -159,6 +166,49 @@ export default function QueueDock() {
   const refocusOnClose = useRef(false);
   const confirmOpen = useUiStore((s) => s.confirm !== null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // How tall the open list is, in pixels; null keeps the stylesheet's default.
+  // Dragged from the grip above the list and remembered.
+  const [height, setHeight] = useState<number | null>(() => {
+    const n = Number(getPref("ui.queue_height"));
+    return Number.isFinite(n) && n >= 60 ? n : null;
+  });
+  const startHeightDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const body = bodyRef.current;
+    if (!body) return;
+    const startY = e.clientY;
+    const startH = body.getBoundingClientRect().height;
+    // Leave room for the header, the strip and a few rows of the panes.
+    // The least it can be is the height it has with no height set, capped at
+    // MIN_QUEUE_H. Measured here, not taken from where this drag starts, or
+    // the minimum would change after every resize. Never above the start
+    // either, so grabbing the grip cannot make it jump.
+    const [setH, setMax] = [body.style.height, body.style.maxHeight];
+    body.style.height = body.style.maxHeight = "";
+    const natural = body.getBoundingClientRect().height;
+    body.style.height = setH;
+    body.style.maxHeight = setMax;
+    const minH = Math.min(MIN_QUEUE_H, natural, startH);
+    const maxH = Math.max(startH, window.innerHeight - 260);
+    let last = startH;
+    const move = (ev: MouseEvent) => {
+      last = Math.round(Math.min(maxH, Math.max(minH, startH + (startY - ev.clientY))));
+      // Straight onto the element: going through state would re-render the
+      // whole dock on every mouse move, which is what made this drag laggy.
+      body.style.height = body.style.maxHeight = `${last}px`;
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.cursor = "";
+      setHeight(last);
+      setPref("ui.queue_height", String(last));
+    };
+    document.body.style.cursor = "row-resize";
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   useEffect(() => {
     // The listener is live before the first read resolves, so an event
@@ -175,6 +225,20 @@ export default function QueueDock() {
       .catch(() => undefined);
     return off;
   }, [setPaused]);
+
+  // Held back by the "only transfer between these hours" setting.
+  const [hoursHold, setHoursHold] = useState(false);
+  useEffect(() => {
+    let fresh = true;
+    const off = on<{ waiting: boolean }>("queue:window", (p) => {
+      fresh = false;
+      setHoursHold(p.waiting);
+    });
+    void queueWindowWaiting()
+      .then((v) => fresh && setHoursHold(v))
+      .catch(() => undefined);
+    return off;
+  }, []);
 
   // Drop selected ids whose rows are gone (cleared, or scrolled out of the
   // list window), so a stale selection can never name rows the user cannot
@@ -349,11 +413,19 @@ export default function QueueDock() {
     });
   }
 
+  // The filter box narrows the list to rows whose name or destination match.
+  const needle = query.trim().toLowerCase();
+  const unfilteredRows = rows.length;
+  if (needle) {
+    rows = rows.filter((t) => `${baseName(t.src)} ${t.dst} ${t.src}`.toLowerCase().includes(needle));
+  }
+
   // ---- Folders and long waits ------------------------------------------
   // Files queued from one folder share a batch. Once two or more of them are
   // unfinished they show as a single row that expands. Rows that are only
   // waiting their turn beyond the first few fold into "+N more waiting".
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Folders start open so every file shows; this holds the ones closed by hand.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [showAllWaiting, setShowAllWaiting] = useState(false);
   const items: QueueItem<(typeof live)[number]>[] = [];
   {
@@ -375,7 +447,7 @@ export default function QueueDock() {
         emitted.add(t.batch);
         const name = t.batch.slice(t.batch.indexOf("|") + 1) || "folder";
         items.push({ kind: "group", key: t.batch, name, all: g.all, open: g.open });
-        if (expanded.has(t.batch)) for (const c of g.open) items.push({ kind: "row", t: c, child: true });
+        if (!collapsed.has(t.batch)) for (const c of g.open) items.push({ kind: "row", t: c, child: true });
         continue;
       }
       if (t.state === "pending" && !t.conflict) {
@@ -444,6 +516,15 @@ export default function QueueDock() {
     setSelected(next);
   };
   const onListKey = (e: React.KeyboardEvent) => {
+    // Typing in the filter box is typing: Delete and Ctrl+A belong to the text.
+    if (e.target instanceof HTMLInputElement) {
+      if (e.key === "Escape" && query) {
+        e.preventDefault();
+        e.stopPropagation();
+        setQuery("");
+      }
+      return;
+    }
     if (e.key === "Escape" && selected.size > 0) {
       e.preventDefault();
       e.stopPropagation();
@@ -454,7 +535,7 @@ export default function QueueDock() {
       // under the pane cursor — silently, if that prompt was suppressed.
       e.preventDefault();
       e.stopPropagation();
-      if (selected.size > 0) cancelSelected();
+      if (selected.size > 0) cancelSet(selected, true);
     } else if (e.key.toLowerCase() === "a" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -554,7 +635,7 @@ export default function QueueDock() {
   // progress is at stake the dialog says what is deleted. The ids are
   // snapshotted with the count, and the backend re-checks each row is still
   // unfinished, so what the dialog says is what happens.
-  const cancelSet = useCallback((sel: Set<number>) => {
+  const cancelSet = useCallback((sel: Set<number>, fromKey = false) => {
     // Live progress is read at click time from the store rather than
     // subscribed: as a dependency it would recreate this callback on
     // every progress tick.
@@ -562,25 +643,33 @@ export default function QueueDock() {
     const rowsToCancel = transfers.filter((t) => sel.has(t.id) && cancellable(t));
     const ids = rowsToCancel.map((t) => t.id);
     if (ids.length === 0) return;
-    const run = () => {
-      void cancelTransfers(ids)
-        .then((n) => {
-          toast("success", `Cancelled ${n} transfer${n === 1 ? "" : "s"}`);
-          setSelected(new Set());
-        })
-        .catch((err: unknown) => toast("error", String(err)));
-    };
     const withData = rowsToCancel.filter(
       (t) => Math.max(progress[t.id]?.bytes ?? 0, t.bytesDone, 0) > 0,
     ).length;
-    if (withData === 0) {
+    const run = () => {
+      setSelected(new Set());
+      // Only cancels that throw data away are worth a few seconds' grace.
+      if (withData > 0) {
+        cancelWithUndo(rowsToCancel);
+        return;
+      }
+      void cancelTransfers(ids)
+        .then((n) => toast("success", `Cancelled ${n} transfer${n === 1 ? "" : "s"}`))
+        .catch((err: unknown) => toast("error", String(err)));
+    };
+    // Ctrl+A then Delete is a habit from file managers, where it means "delete
+    // everything": cancelling several rows from the keyboard always asks.
+    const forced = fromKey && ids.length > 1;
+    if (withData === 0 && !forced) {
       run();
       return;
     }
     const one = ids.length === 1;
     refocusOnClose.current = true;
     let body: string;
-    if (one) {
+    if (withData === 0) {
+      body = "None of them has started, so no data is lost, but they leave the queue. Delete only removes queued transfers; it never touches files in the panes.";
+    } else if (one) {
       body =
         "Its part-transferred data is deleted, so this file starts from the beginning if you queue it again. Pause instead to stop it and keep the progress.";
     } else if (withData === ids.length) {
@@ -592,7 +681,7 @@ export default function QueueDock() {
     // Its own suppress key: agreeing to skip the warning for one named file
     // is not consent to skip it for a Ctrl+A over a 40 GB upload.
     askConfirm({
-      suppressKey: "cancel-selected",
+      suppressKey: forced ? undefined : "cancel-selected",
       title: `Cancel ${ids.length} transfer${one ? "" : "s"}?`,
       body,
       confirmLabel: one ? "Cancel transfer" : "Cancel transfers",
@@ -783,6 +872,14 @@ export default function QueueDock() {
               {" · "}queue paused
             </span>
           )}
+          {!paused && hoursHold && (
+            <span
+              className="dock__flag dock__flag--paused"
+              title="Transfer hours are on: nothing new starts until they begin. Change them in Settings."
+            >
+              {" · "}waiting for transfer hours
+            </span>
+          )}
         </span>
         <span className="grow" />
         <span className="dock__title">Queue</span>
@@ -791,8 +888,22 @@ export default function QueueDock() {
 
       {open && (
         <div
+          className="dock__grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize the queue"
+          title="Drag to resize the queue — double-click to reset"
+          onMouseDown={startHeightDrag}
+          onDoubleClick={() => {
+            setHeight(null);
+            setPref("ui.queue_height", "0");
+          }}
+        />
+      )}
+      {open && (
+        <div
           className="dock__body"
-          style={colStyle}
+          style={height ? { ...colStyle, maxHeight: height, height } : colStyle}
           ref={bodyRef}
           tabIndex={-1}
           onKeyDown={onListKey}
@@ -852,6 +963,19 @@ export default function QueueDock() {
               </>
             )}
             <span className="grow" />
+            <input
+              className="dock__filter"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter queue"
+              aria-label="Filter the queue by name or destination"
+              spellCheck={false}
+            />
+            {needle && (
+              <span className="dock__filtercount">
+                {rows.length} of {unfilteredRows}
+              </span>
+            )}
             <button onClick={reset} title="Restore default column widths">
               <Refresh size={12} />
               Reset columns
@@ -959,7 +1083,9 @@ export default function QueueDock() {
           </div>
 
           {rows.length === 0 ? (
-            <div className="dock__empty">Nothing queued — mark files and press F5</div>
+            <div className="dock__empty">
+              {needle ? "No queued transfer matches the filter" : "Nothing queued — mark files and press F5"}
+            </div>
           ) : (
             <div
               className="dock__list"
@@ -998,12 +1124,12 @@ export default function QueueDock() {
                 const nActive = g.open.filter((t) => t.state === "active").length;
                 const nFailed = g.open.filter((t) => t.state === "failed").length;
                 const nDone = g.all.filter((t) => t.state === "completed").length;
-                const isOpen = expanded.has(g.key);
+                const isOpen = !collapsed.has(g.key);
                 const siteName = sites.find((s) => s.id === first.siteId)?.name ?? `site ${first.siteId}`;
                 const cut = first.dst.lastIndexOf(g.name);
                 const folderDst = cut >= 0 ? first.dst.slice(0, cut + g.name.length) : first.dst;
                 const toggle = () =>
-                  setExpanded((prev) => {
+                  setCollapsed((prev) => {
                     const next = new Set(prev);
                     if (!next.delete(g.key)) next.add(g.key);
                     return next;

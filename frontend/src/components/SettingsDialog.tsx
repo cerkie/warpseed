@@ -22,6 +22,7 @@ import { DEFAULT_FORM, DEFAULT_PORT, formFields, formOf, secretLabel, type SiteF
 import ProtocolField from "./ProtocolField";
 import { askDeleteSite } from "../lib/sites";
 import ImportHint from "./ImportHint";
+import Info from "./Info";
 import Switch from "./Switch";
 import { friendlyError } from "../lib/errors";
 import { setPref } from "../lib/prefs";
@@ -46,6 +47,7 @@ interface SiteDraft extends SiteForm {
   username: string;
   remotePath: string;
   maxTransfers: number;
+  speedMiB: number; // 0 = no limit of its own
   password: string; // empty = leave stored credential unchanged
 }
 
@@ -58,6 +60,7 @@ function draftFrom(s: Site): SiteDraft {
     username: s.username,
     remotePath: s.remotePath ?? "",
     maxTransfers: s.maxTransfers ?? 0,
+    speedMiB: s.bandwidthLimit ? Math.round((s.bandwidthLimit / MIB) * 10) / 10 : 0,
     password: "",
     ...formOf(s),
   };
@@ -71,6 +74,7 @@ const blankDraft = (): SiteDraft => ({
   username: "",
   remotePath: "",
   maxTransfers: 0,
+  speedMiB: 0,
   password: "",
   ...DEFAULT_FORM,
 });
@@ -88,6 +92,92 @@ const CONFLICT_RULES = [
   { key: "transfers.conflict_identical", def: "skip", label: "Identical (same size and time)" },
   { key: "transfers.conflict_other", def: "ask", label: "Anything else" },
 ];
+
+/** One setting: its name (and a short hint, or an "i" for more) on the left and
+    its control on the right. Every control sits in the same right-hand column. */
+function Row({
+  label,
+  hint,
+  info,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  info?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="set-row">
+      <div className="set-row__text">
+        <span className="set-row__label">
+          {label}
+          {info && <Info>{info}</Info>}
+        </span>
+        {hint && <span className="set-row__hint">{hint}</span>}
+      </div>
+      <div className="set-row__control">{children}</div>
+    </div>
+  );
+}
+
+/** A number box with its unit inside, so every box is the same width and the
+    units line up down the page. */
+function NumField({
+  label,
+  value,
+  onChange,
+  unit,
+  min,
+  max,
+  placeholder,
+}: {
+  label: string;
+  value: string | number;
+  onChange: (v: string) => void;
+  unit?: string;
+  min?: number;
+  max?: number;
+  placeholder?: string;
+}) {
+  return (
+    <span className="numfield">
+      <input
+        type="number"
+        aria-label={label}
+        min={min}
+        max={max}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={unit ? { paddingRight: `${16 + unit.length * 7}px` } : undefined}
+      />
+      {unit && <span className="numfield__unit">{unit}</span>}
+    </span>
+  );
+}
+
+/** A short list of choices where exactly one is picked. */
+function Seg({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: [string, string][];
+}) {
+  return (
+    <div className="segmented segmented--row" role="radiogroup" aria-label={label}>
+      {options.map(([v, text]) => (
+        <button key={v} className={value === v ? "seg--on" : ""} role="radio" aria-checked={value === v} onClick={() => onChange(v)}>
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function SettingsDialog() {
   const open = useUiStore((s) => s.settingsOpen);
@@ -223,6 +313,7 @@ export default function SettingsDialog() {
           username: draft.username.trim(),
           remotePath: draft.remotePath.trim(),
           maxTransfers: Number(draft.maxTransfers) || 0,
+          bandwidthLimit: Math.max(0, Math.round((Number(draft.speedMiB) || 0) * MIB)),
         },
         draft.password,
       );
@@ -296,343 +387,266 @@ export default function SettingsDialog() {
               </button>
             ))}
           </div>
-          <p className="set-note">
-            Each theme carries its own palette, type pairing and row density.
-          </p>
-        </section>
-
-        <section className="set-section" data-tab="transfers">
-          <h3>Transfers</h3>
-          <p className="set-note set-blurb">
-            How many connections warpseed may open at once. A Hyperlane file uses one
-            connection per lane, so 8 connections run two 4-lane files at a time. If the
-            limit is lower than the lane count, the file uses fewer lanes.
-          </p>
-          <div className="set-row">
-            <label title="The most connections open at once, across every site">Connections, all sites</label>
-            <input
-              type="number"
-              min={1}
-              max={16}
-              value={cfg["transfers.global_max"] ?? "6"}
-              onChange={(e) => put("transfers.global_max", e.target.value)}
-            />
-          </div>
-          <div className="set-row">
-            <label title="The most connections open at once to a single site">Connections per site</label>
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={cfg["transfers.site_max"] ?? "3"}
-              onChange={(e) => put("transfers.site_max", e.target.value)}
-            />
-          </div>
-          <p className="set-note">
-            A site can override this in its own settings. Keep it at or below what your
-            server allows; refused connections show up in the log.
-          </p>
-        </section>
-
-        <section className="set-section" data-tab="transfers">
-          <h3>When the file already exists</h3>
-          <p className="set-note set-blurb">
-            Checked before a transfer starts. &ldquo;Ask&rdquo; holds the file in the queue
-            and shows both versions side by side. &ldquo;Incoming&rdquo; means the file
-            being sent, for uploads and downloads alike.
-          </p>
-          {CONFLICT_RULES.map((r) => (
-            <div className="set-row" key={r.key}>
-              <label>{r.label}</label>
-              <select
-                value={cfg[r.key] ?? r.def}
-                onChange={(e) => put(r.key, e.target.value)}
-              >
-                <option value="ask">Ask me</option>
-                <option value="overwrite">Overwrite</option>
-                <option value="skip">Skip</option>
-                <option value="rename">Keep both</option>
-              </select>
-            </div>
-          ))}
-          <p className="set-note">
-            Keep both transfers to a free name beside the existing file &mdash;
-            &ldquo;ep01.mkv&rdquo; becomes &ldquo;ep01 (1).mkv&rdquo;.
-          </p>
-        </section>
-
-        <section className="set-section" data-tab="transfers">
-          <h3>Hyperlane · Downloads</h3>
-          <p className="set-note set-blurb">
-            Splits a large file across several connections, so a server that limits each
-            connection can&rsquo;t limit the whole file. Downloads and uploads are set
-            separately.
-          </p>
-          <div className="set-row">
-            <label title="How many connections one large file is split across">Lanes per file</label>
-            <span className="set-inline">
-              <input
-                type="number"
-                min={1}
-                max={16}
-                value={cfg["transfers.chunk_streams"] ?? "4"}
-                onChange={(e) => put("transfers.chunk_streams", e.target.value)}
-              />
-              <span className="set-note">connections (1 = off)</span>
-            </span>
-          </div>
-          {laneNote("transfers.chunk_streams", 4)}
-          <div className="set-row">
-            <label title="Files smaller than this use a single connection">Engage above</label>
-            <span className="set-inline">
-              <input
-                type="number"
-                min={0}
-                value={cfg["transfers.chunk_min_mb"] ?? "256"}
-                onChange={(e) => put("transfers.chunk_min_mb", e.target.value)}
-              />
-              <span className="set-note">MB</span>
-            </span>
-          </div>
-        </section>
-
-        <section className="set-section" data-tab="transfers">
-          <h3>Hyperlane · Uploads</h3>
-          <div className="set-row">
-            <label title="How many connections one large file is split across">Lanes per file</label>
-            <span className="set-inline">
-              <input
-                type="number"
-                min={1}
-                max={16}
-                value={cfg["transfers.upload_chunk_streams"] ?? "3"}
-                onChange={(e) => put("transfers.upload_chunk_streams", e.target.value)}
-              />
-              <span className="set-note">connections (1 = off)</span>
-            </span>
-          </div>
-          {laneNote("transfers.upload_chunk_streams", 3)}
-          <div className="set-row">
-            <label title="Files smaller than this use a single connection">Engage above</label>
-            <span className="set-inline">
-              <input
-                type="number"
-                min={0}
-                value={cfg["transfers.upload_chunk_min_mb"] ?? "128"}
-                onChange={(e) => put("transfers.upload_chunk_min_mb", e.target.value)}
-              />
-              <span className="set-note">MB</span>
-            </span>
-          </div>
-          <p className="set-note">
-            Upload speed usually peaks around 3 lanes; more connections add overhead
-            without adding speed.
-          </p>
         </section>
 
         <section className="set-section" data-tab="general">
-          <h3>Closing</h3>
-          <div
-            className="segmented"
-            role="radiogroup"
-            aria-label="When closing with transfers running"
-          >
-            {[
-              ["ask", "Ask"],
-              ["quit", "Close"],
-              ["pill", "Minimize to pill"],
-            ].map(([v, label]) => (
-              <button
-                key={v}
-                className={closeAction === v ? "seg--on" : ""}
-                role="radio"
-                aria-checked={closeAction === v}
-                onClick={() => put("ui.close_action", v)}
-              >
-                {label}
-              </button>
+          <h3>When closing and starting</h3>
+          <div className="set-card">
+            <Row
+              label="Closing with transfers running"
+              info="Unfinished transfers are kept and carry on next time you open warpseed. “Close” skips the confirmation. “Minimize to pill” shrinks the window instead of closing it. With nothing transferring, warpseed always closes straight away."
+            >
+              <Seg
+                label="When closing with transfers running"
+                value={closeAction}
+                onChange={(v) => put("ui.close_action", v)}
+                options={[
+                  ["ask", "Ask"],
+                  ["quit", "Close"],
+                  ["pill", "Minimize to pill"],
+                ]}
+              />
+            </Row>
+            <Row
+              label="Queue when warpseed opens"
+              info="“Start paused” opens warpseed with the queue stopped. Nothing moves until you press Resume queue. Pausing from the queue is remembered too."
+            >
+              <Seg
+                label="Queue on launch"
+                value={startPaused ? "1" : "0"}
+                onChange={(v) => put("queue.start_paused", v)}
+                options={[
+                  ["0", "Resume"],
+                  ["1", "Start paused"],
+                ]}
+              />
+            </Row>
+          </div>
+        </section>
+
+        <section className="set-section" data-tab="general">
+          <h3>Schedule and alerts</h3>
+          <div className="set-card">
+            <Row
+              label="Only transfer at set hours"
+              info="Outside those hours nothing new starts, and the queue says it is waiting. Transfers already running finish. Nothing is paused or cancelled, so leave warpseed open and it carries on when the hours begin."
+            >
+              <Switch
+                label="Only transfer at set hours"
+                checked={cfg["queue.window_on"] === "1"}
+                onChange={(on) => put("queue.window_on", on ? "1" : "0")}
+              />
+            </Row>
+            {cfg["queue.window_on"] === "1" && (
+              <>
+                <Row label="Start at">
+                  <NumField label="Start hour" unit=":00" min={0} max={23} value={cfg["queue.window_from"] ?? "1"} onChange={(v) => put("queue.window_from", v)} />
+                </Row>
+                <Row label="Stop at">
+                  <NumField label="Stop hour" unit=":00" min={0} max={23} value={cfg["queue.window_to"] ?? "7"} onChange={(v) => put("queue.window_to", v)} />
+                </Row>
+              </>
+            )}
+            <Row label="Tell me when the queue finishes" hint="Only while warpseed is in the background">
+              <Switch
+                label="Tell me when the queue finishes"
+                checked={cfg["ui.notify"] !== "0"}
+                onChange={(on) => {
+                  put("ui.notify", on ? "1" : "0");
+                  setPref("ui.notify", on ? "1" : "0");
+                }}
+              />
+            </Row>
+          </div>
+        </section>
+
+        <section className="set-section" data-tab="transfers">
+          <h3>Connections</h3>
+          <div className="set-card">
+            <Row
+              label="All sites together"
+              info="How many connections warpseed opens at once. A Hyperlane file uses one connection per lane. If the limit is lower than the lane count, the file uses fewer lanes."
+            >
+              <NumField label="Connections, all sites" min={1} max={16} value={cfg["transfers.global_max"] ?? "6"} onChange={(v) => put("transfers.global_max", v)} />
+            </Row>
+            <Row
+              label="Per site"
+              info="The most connections open at once to one site. A site can set its own number in its settings. Stay at or below what your server allows; refused connections show up in the log."
+            >
+              <NumField label="Connections per site" min={1} max={8} value={cfg["transfers.site_max"] ?? "3"} onChange={(v) => put("transfers.site_max", v)} />
+            </Row>
+          </div>
+        </section>
+
+        <section className="set-section" data-tab="transfers">
+          <h3>
+            When the file already exists
+            <Info>
+              What to do when a file is already at the destination. &ldquo;Ask&rdquo; holds it in the
+              queue so you can compare both versions. &ldquo;Incoming&rdquo; is the file being sent, in
+              either direction. &ldquo;Keep both&rdquo; saves the new one under a free name, like
+              &ldquo;ep01 (1).mkv&rdquo;.
+            </Info>
+          </h3>
+          <div className="set-card">
+            {CONFLICT_RULES.map((r) => (
+              <Row key={r.key} label={r.label}>
+                <select aria-label={r.label} value={cfg[r.key] ?? r.def} onChange={(e) => put(r.key, e.target.value)}>
+                  <option value="ask">Ask me</option>
+                  <option value="overwrite">Overwrite</option>
+                  <option value="skip">Skip</option>
+                  <option value="rename">Keep both</option>
+                </select>
+              </Row>
             ))}
           </div>
-          <p className="set-note">
-            Unfinished transfers are kept and resume the next time you open warpseed
-            (or wait, if the queue starts paused). &ldquo;Close&rdquo; skips the
-            confirmation. &ldquo;Minimize to pill&rdquo; shrinks the window instead of
-            closing it. With nothing transferring, warpseed always closes straight away.
-          </p>
         </section>
 
-        <section className="set-section" data-tab="general">
-          <h3>Queue on launch</h3>
-          <div className="segmented" role="radiogroup" aria-label="Queue on launch">
-            {[
-              ["0", "Resume transfers"],
-              ["1", "Start paused"],
-            ].map(([v, label]) => (
-              <button
-                key={v}
-                className={(startPaused ? "1" : "0") === v ? "seg--on" : ""}
-                role="radio"
-                aria-checked={(startPaused ? "1" : "0") === v}
-                onClick={() => put("queue.start_paused", v)}
-              >
-                {label}
-              </button>
-            ))}
+        <section className="set-section" data-tab="transfers">
+          <h3>Checks and warnings</h3>
+          <div className="set-card">
+            <Row
+              label="Check files after transfer"
+              hint="Slower, but catches damaged files"
+              info="Compares each finished file with the server's copy, so transfers finish a bit later. It works with SFTP servers that have sha256sum; other sites are skipped. A download that doesn't match is deleted and marked failed so you can retry it."
+            >
+              <Switch
+                label="Check files after transfer"
+                checked={cfg["transfers.verify"] === "1"}
+                onChange={(on) => put("transfers.verify", on ? "1" : "0")}
+              />
+            </Row>
+            <Row label="Warn when the disk is short" hint="Before a download that won't fit">
+              <Switch
+                label="Warn when the disk is short"
+                checked={cfg["transfers.space_warning"] !== "0"}
+                onChange={(on) => put("transfers.space_warning", on ? "1" : "0")}
+              />
+            </Row>
+            <Row
+              label="Remember each site's folder and sort"
+              info="Opens each site in the folder you last used there. The sort order is shared by both panes, so it follows the site you open."
+            >
+              <Switch
+                label="Remember each site's folder and sort"
+                checked={cfg["ui.remember_site_views"] === "1"}
+                onChange={(on) => {
+                  put("ui.remember_site_views", on ? "1" : "0");
+                  setPref("ui.remember_site_views", on ? "1" : "0");
+                }}
+              />
+            </Row>
           </div>
-          <p className="set-note">
-            &ldquo;Start paused&rdquo; opens warpseed with the queue stopped. Everything is
-            still there, but nothing moves until you press <strong>Resume queue</strong>{" "}
-            in the dock. Pausing from the dock is also remembered.
-          </p>
         </section>
 
-        <section className="set-section" data-tab="general">
-          <h3>Notifications</h3>
-          <label className="set-check">
-            <input
-              type="checkbox"
-              checked={cfg["ui.notify"] !== "0"}
-              onChange={(e) => {
-                put("ui.notify", e.target.checked ? "1" : "0");
-                setPref("ui.notify", e.target.checked ? "1" : "0");
-              }}
-            />
-            Tell me when the queue finishes while warpseed is in the background
-          </label>
+        <section className="set-section" data-tab="transfers">
+          <h3>
+            Hyperlane
+            <Info>
+              Splits a big file across several connections, so a server that limits each connection
+              can&rsquo;t slow the whole file. Downloads and uploads are set separately. Upload speed
+              usually stops improving after about 3 lanes.
+            </Info>
+          </h3>
+          <div className="set-card">
+            <p className="set-card__sub">Downloads</p>
+            <Row label="Lanes per file" hint="1 turns Hyperlane off">
+              <NumField label="Download lanes per file" unit="lanes" min={1} max={16} value={cfg["transfers.chunk_streams"] ?? "4"} onChange={(v) => put("transfers.chunk_streams", v)} />
+            </Row>
+            {laneNote("transfers.chunk_streams", 4)}
+            <Row label="Only for files over" hint="Smaller files use one connection">
+              <NumField label="Download Hyperlane threshold" unit="MB" min={0} value={cfg["transfers.chunk_min_mb"] ?? "256"} onChange={(v) => put("transfers.chunk_min_mb", v)} />
+            </Row>
+            <p className="set-card__sub">Uploads</p>
+            <Row label="Lanes per file" hint="1 turns Hyperlane off">
+              <NumField label="Upload lanes per file" unit="lanes" min={1} max={16} value={cfg["transfers.upload_chunk_streams"] ?? "3"} onChange={(v) => put("transfers.upload_chunk_streams", v)} />
+            </Row>
+            {laneNote("transfers.upload_chunk_streams", 3)}
+            <Row label="Only for files over" hint="Smaller files use one connection">
+              <NumField label="Upload Hyperlane threshold" unit="MB" min={0} value={cfg["transfers.upload_chunk_min_mb"] ?? "128"} onChange={(v) => put("transfers.upload_chunk_min_mb", v)} />
+            </Row>
+          </div>
         </section>
 
         <section className="set-section" data-tab="transfers">
           <h3>Bandwidth</h3>
-          <div className="set-row">
-            <label title="Cap the combined speed of all transfers">Speed limit</label>
-            <div className="segmented segmented--row" role="radiogroup" aria-label="Bandwidth limit mode">
-              {[
-                ["off", "Off"],
-                ["fixed", "Fixed"],
-                ["percent", "% of max"],
-              ].map(([v, label]) => (
-                <button
-                  key={v}
-                  className={bwMode === v ? "seg--on" : ""}
-                  role="radio"
-                  aria-checked={bwMode === v}
-                  onClick={() => put("bw.mode", v)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {bwMode === "fixed" && (
-            <div className="set-row">
-              <label>Limit</label>
-              <span className="set-inline">
-                <input
-                  type="number"
+          <div className="set-card">
+            <Row label="Speed limit" hint="For all transfers together">
+              <Seg
+                label="Bandwidth limit mode"
+                value={bwMode}
+                onChange={(v) => put("bw.mode", v)}
+                options={[
+                  ["off", "Off"],
+                  ["fixed", "Fixed"],
+                  ["percent", "% of max"],
+                ]}
+              />
+            </Row>
+            {bwMode === "fixed" && (
+              <Row label="Limit">
+                <NumField
+                  label="Limit"
+                  unit="MiB/s"
                   min={1}
-                  value={
-                    Number(cfg["bw.limit_bytes"] || 0) > 0
-                      ? Math.round(Number(cfg["bw.limit_bytes"]) / MIB)
-                      : ""
-                  }
                   placeholder="none"
-                  onChange={(e) => put("bw.limit_bytes", String(Number(e.target.value) * MIB))}
+                  value={Number(cfg["bw.limit_bytes"] || 0) > 0 ? Math.round(Number(cfg["bw.limit_bytes"]) / MIB) : ""}
+                  onChange={(v) => put("bw.limit_bytes", String(Number(v) * MIB))}
                 />
-                <span className="set-note">MiB/s</span>
-              </span>
-            </div>
-          )}
-          {bwMode === "percent" && (
-            <div className="set-row">
-              <label>Throttle to</label>
-              <span className="set-inline">
-                <input
-                  type="number"
-                  min={10}
-                  max={95}
-                  value={cfg["bw.percent"] ?? "80"}
-                  onChange={(e) => put("bw.percent", e.target.value)}
-                />
-                <span className="set-note">
-                  % of the fastest speed seen
-                  {observedMax > 0 ? ` (${formatSize(observedMax)}/s so far)` : " (measuring…)"}
-                </span>
-              </span>
-            </div>
-          )}
-          <div className="set-row">
-            <label title="Use a lower limit during chosen hours, for example while you work">
-              Slow down at set hours
-            </label>
-            <Switch
-              checked={cfg["bw.sched_on"] === "1"}
-              onChange={(on) => put("bw.sched_on", on ? "1" : "0")}
+              </Row>
+            )}
+            {bwMode === "percent" && (
+              <Row
+                label="Throttle to"
+                hint={`% of the fastest speed seen${observedMax > 0 ? ` (${formatSize(observedMax)}/s so far)` : " (measuring…)"}`}
+              >
+                <NumField label="Throttle percent" unit="%" min={10} max={95} value={cfg["bw.percent"] ?? "80"} onChange={(v) => put("bw.percent", v)} />
+              </Row>
+            )}
+            <Row label="Slow down at set hours" info="The schedule can only lower a limit you already set, never raise it.">
+              <Switch
+                label="Slow down at set hours"
+                checked={cfg["bw.sched_on"] === "1"}
+                onChange={(on) => put("bw.sched_on", on ? "1" : "0")}
+              />
+            </Row>
+            {cfg["bw.sched_on"] === "1" && (
+              <>
+                <Row label="From">
+                  <NumField label="From hour" unit=":00" min={0} max={23} value={cfg["bw.sched_from"] ?? "9"} onChange={(v) => put("bw.sched_from", v)} />
+                </Row>
+                <Row label="To">
+                  <NumField label="To hour" unit=":00" min={0} max={23} value={cfg["bw.sched_to"] ?? "17"} onChange={(v) => put("bw.sched_to", v)} />
+                </Row>
+                <Row label="Limit during those hours">
+                  <NumField
+                    label="Limit during those hours"
+                    unit="MiB/s"
+                    min={1}
+                    placeholder="none"
+                    value={Number(cfg["bw.sched_limit_bytes"] || 0) > 0 ? Math.round(Number(cfg["bw.sched_limit_bytes"]) / MIB) : ""}
+                    onChange={(v) => put("bw.sched_limit_bytes", String(Math.max(1, Number(v)) * MIB))}
+                  />
+                </Row>
+              </>
+            )}
+            <Row
+              label="Speed readout"
+              info="Live follows the current speed. Average smooths it over each transfer, so the number stops jumping around."
             >
-              {cfg["bw.sched_on"] === "1" ? "On" : "Off"}
-            </Switch>
-          </div>
-          {cfg["bw.sched_on"] === "1" && (
-            <div className="set-row">
-              <label>Between</label>
-              <span className="set-inline">
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  aria-label="From hour"
-                  value={cfg["bw.sched_from"] ?? "9"}
-                  onChange={(e) => put("bw.sched_from", e.target.value)}
-                />
-                <span className="set-note">and</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  aria-label="To hour"
-                  value={cfg["bw.sched_to"] ?? "17"}
-                  onChange={(e) => put("bw.sched_to", e.target.value)}
-                />
-                <span className="set-note">o&rsquo;clock, limit to</span>
-                <input
-                  type="number"
-                  min={1}
-                  aria-label="Limit during those hours"
-                  value={
-                    Number(cfg["bw.sched_limit_bytes"] || 0) > 0
-                      ? Math.round(Number(cfg["bw.sched_limit_bytes"]) / MIB)
-                      : ""
-                  }
-                  placeholder="MiB/s"
-                  onChange={(e) => put("bw.sched_limit_bytes", String(Math.max(1, Number(e.target.value)) * MIB))}
-                />
-                <span className="set-note">MiB/s</span>
-              </span>
-            </div>
-          )}
-          <p className="set-note">The schedule can only lower a limit you already set, never raise it.</p>
-          <div className="set-row">
-            <label title="Live follows the current speed. Average smooths it over each transfer, so the number stops jumping around.">
-              Speed readout
-            </label>
-            <div className="segmented segmented--row" role="radiogroup" aria-label="How speeds are shown">
-              {[
-                ["live", "Live"],
-                ["average", "Average"],
-              ].map(([v, label]) => (
-                <button
-                  key={v}
-                  className={speedMode === v ? "seg--on" : ""}
-                  role="radio"
-                  aria-checked={speedMode === v}
-                  onClick={() => {
-                    put("ui.speed_mode", v);
-                    setPref("ui.speed_mode", v);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+              <Seg
+                label="How speeds are shown"
+                value={speedMode}
+                onChange={(v) => {
+                  put("ui.speed_mode", v);
+                  setPref("ui.speed_mode", v);
+                }}
+                options={[
+                  ["live", "Live"],
+                  ["average", "Average"],
+                ]}
+              />
+            </Row>
           </div>
         </section>
 
@@ -725,6 +739,18 @@ export default function SettingsDialog() {
                     onChange={(e) => setDraft({ ...draft, maxTransfers: Number(e.target.value) || 0 })}
                   />
                 </div>
+                <div className="field">
+                  <label title="Caps this site's combined speed. The overall speed limit still applies; the lower of the two wins.">
+                    Speed limit, MiB/s (0 = none)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={draft.speedMiB}
+                    onChange={(e) => setDraft({ ...draft, speedMiB: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                </div>
                 <AutoConnectField checked={draft.autoConnect} onChange={(autoConnect) => setDraft({ ...draft, autoConnect })} />
               </div>
               <div className="dialog__actions">
@@ -747,60 +773,64 @@ export default function SettingsDialog() {
         </section>
 
         <section className="set-section" data-tab="about">
-          <h3>Data</h3>
-          <p className="set-note set-blurb">
-            Sites, bookmarks, the transfer queue, pinned host keys and every setting
-            here live in one file. Passwords are the exception — those stay in Windows
-            Credential Manager and are not part of a backup.
-          </p>
-          <div className="set-row">
-            <label>Settings file</label>
-            <span className="set-inline">
-              <code className="set-path" title={data?.path}>
-                {data?.path ?? "…"}
-              </code>
-            </span>
-          </div>
-          <div className="dialog__actions" style={{ marginTop: "var(--sp-2)" }}>
-            <button className="btn" onClick={() => void openDataFolder().catch(() => undefined)}>
-              Open folder
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                setOpen(false);
-                useUiStore.getState().setHistoryOpen(true);
-              }}
+          <h3>
+            Data
+            <Info>
+              Sites, bookmarks, the queue, saved host keys and your settings live in one file.
+              Passwords are kept in Windows Credential Manager instead and are not part of a backup.
+            </Info>
+          </h3>
+          <div className="set-card">
+            <Row label="Settings file" hint={data?.path ?? "…"}>
+              <button className="btn" onClick={() => void openDataFolder().catch(() => undefined)}>
+                Open folder
+              </button>
+            </Row>
+            <Row
+              label="Backups"
+              hint={
+                data && data.backups.length > 0
+                  ? `${data.backups.length} saved · newest ${data.backups[0]}`
+                  : "None yet"
+              }
+              info={
+                <>
+                  To restore one: close warpseed, delete <code>warpseed.db</code> and any{" "}
+                  <code>warpseed.db-wal</code> and <code>warpseed.db-shm</code> next to it, then rename the
+                  backup to <code>warpseed.db</code>. Leave those two extra files behind and old changes get
+                  replayed over the restored copy.
+                </>
+              }
             >
-              Transfer history
-            </button>
-            <span style={{ flex: 1 }} />
-            <button
-              className="btn btn--primary"
-              disabled={backingUp}
-              onClick={() => {
-                setBackingUp(true);
-                void backupData()
-                  .then((name) => setSiteMsg(`Backed up to ${name}`))
-                  .catch((err: unknown) => setSiteMsg(String(err)))
-                  .finally(() => {
-                    setBackingUp(false);
-                    void dataLocation().then(setData).catch(() => undefined);
-                  });
-              }}
-            >
-              {backingUp ? "Backing up…" : "Back up now"}
-            </button>
+              <button
+                className="btn btn--primary"
+                disabled={backingUp}
+                onClick={() => {
+                  setBackingUp(true);
+                  void backupData()
+                    .then((name) => setSiteMsg(`Backed up to ${name}`))
+                    .catch((err: unknown) => setSiteMsg(String(err)))
+                    .finally(() => {
+                      setBackingUp(false);
+                      void dataLocation().then(setData).catch(() => undefined);
+                    });
+                }}
+              >
+                {backingUp ? "Backing up…" : "Back up now"}
+              </button>
+            </Row>
+            <Row label="Transfer history" hint="Finished transfers you have cleared from the queue">
+              <button
+                className="btn"
+                onClick={() => {
+                  setOpen(false);
+                  useUiStore.getState().setHistoryOpen(true);
+                }}
+              >
+                View
+              </button>
+            </Row>
           </div>
-          {data && data.backups.length > 0 && (
-            <p className="set-note" style={{ marginTop: "var(--sp-2)" }}>
-              {data.backups.length} backup{data.backups.length === 1 ? "" : "s"} · newest{" "}
-              {data.backups[0]}. To restore one: close warpseed, delete
-              warpseed.db along with any warpseed.db-wal and warpseed.db-shm beside it,
-              then rename the backup to warpseed.db. Leaving the -wal file behind
-              replays old changes over the restored copy.
-            </p>
-          )}
         </section>
 
         <section className="set-section" data-tab="about">
@@ -815,7 +845,9 @@ export default function SettingsDialog() {
               updates and more, on top of their work.
             </p>
             <p>
-              <strong>Donations go to {COMPANY}</strong>, not to the fork, because they did the hard part.{" "}
+              <strong>Donations go to {COMPANY}</strong>, not to the fork, because they did the hard part.
+            </p>
+            <p>
               <strong>Bug reports sent from here go to this fork</strong>, not to them, so the fork&rsquo;s issue
               page is where they land.
             </p>
@@ -828,14 +860,34 @@ export default function SettingsDialog() {
               </button>
             </div>
           </div>
-          <div className="update-card">
-            <Switch
-              checked={(cfg["updates.check"] ?? "1") === "1"}
-              onChange={(on) => put("updates.check", on ? "1" : "0")}
+        </section>
+
+        <section className="set-section" data-tab="about">
+          <h3>Updates</h3>
+          <div className="set-card">
+            <Row
+              label="Check for updates at launch"
+              hint="Free, and always will be"
+              info={`Checking sends no identifiers or usage data; it only asks a public page for the latest version. Nothing downloads until you press Install, and the download is checked against GitHub's checksum before anything is replaced. If warpseed saves you time, a coffee for ${COMPANY} is the best thank-you.`}
             >
-              Check for updates when warpseed starts
-            </Switch>
-            <div className="update-card__row">
+              <Switch
+                label="Check for updates at launch"
+                checked={(cfg["updates.check"] ?? "1") === "1"}
+                onChange={(on) => put("updates.check", on ? "1" : "0")}
+              />
+            </Row>
+            <Row label="Check now" hint={updateMsg || (repo ? `Looks at github.com/${repo}` : "")}>
+              {update?.available && (
+                <button
+                  className="btn btn--primary"
+                  onClick={() => {
+                    setOpen(false);
+                    setUpdateOpen(true);
+                  }}
+                >
+                  What&rsquo;s new &amp; install
+                </button>
+              )}
               <button
                 className="btn"
                 disabled={checking}
@@ -859,54 +911,42 @@ export default function SettingsDialog() {
               >
                 {checking ? "Checking…" : "Check now"}
               </button>
-              {update?.available && (
-                <button
-                  className="btn btn--primary"
-                  onClick={() => {
-                    setOpen(false);
-                    setUpdateOpen(true);
-                  }}
-                >
-                  What&rsquo;s new &amp; install
-                </button>
-              )}
-              <span className="set-note">{updateMsg || (repo ? `Checks github.com/${repo}` : "")}</span>
-            </div>
+            </Row>
           </div>
-          <p className="set-note">
-            One check per launch. It sends no identifiers and no usage data: the
-            request only asks a public page what the latest version is. When
-            there is a newer release, nothing is downloaded until you press
-            Install, and the download is checked against the checksum GitHub
-            publishes for it before anything is replaced. It is free and always
-            will be; if it saves you time, a coffee for {COMPANY} is the best thank-you.
-          </p>
-          <div className="dialog__actions" style={{ marginTop: "var(--sp-2)" }}>
-            <button className="btn" onClick={() => openExternal(WEBSITE_URL)}>
-              zyralabs.tech
-            </button>
-            <button
-              className="btn"
-              title="Opens a new issue on this fork's GitHub page"
-              onClick={() => openExternal(bugReportUrl(version))}
+        </section>
+
+        <section className="set-section" data-tab="about">
+          <h3>Help and support</h3>
+          <div className="set-card">
+            <Row label="Report a bug" hint="Opens an issue on this fork's GitHub page">
+              <button className="btn" onClick={() => openExternal(bugReportUrl(version))}>
+                <Bug size={12} className="btn__ico" /> Report a bug
+              </button>
+            </Row>
+            <Row label="Log file" hint="Attach warpseed.log to a bug report">
+              <button className="btn" onClick={() => void logDir()}>
+                Open log folder
+              </button>
+            </Row>
+            <Row
+              label="Verbose log"
+              hint="Extra detail in the log"
+              info="Records per-lane offsets, first-write timing and cancel latency in warpseed.log. Turn it on when reporting a stall, then send the log."
             >
-              <Bug size={12} className="btn__ico" /> Report a bug
-            </button>
-            <button className="btn" onClick={() => void logDir()} title="warpseed.log — attach it to a bug report">
-              Open log folder
-            </button>
-            <label className="set-check" title="Per-lane offsets, first-write timing and cancel latency in warpseed.log. Turn on when reporting a stall, then send the log.">
-              <input
-                type="checkbox"
+              <Switch
+                label="Verbose log"
                 checked={cfg["log.verbose"] === "1"}
-                onChange={(e) => put("log.verbose", e.target.checked ? "1" : "0")}
+                onChange={(on) => put("log.verbose", on ? "1" : "0")}
               />
-              Verbose log
-            </label>
-            <span style={{ flex: 1 }} />
-            <button className="btn btn--primary" onClick={() => openExternal(DONATE_URL)}>
-              <Heart size={12} className="btn__ico" /> Support {COMPANY}
-            </button>
+            </Row>
+            <Row label={COMPANY} hint="Made warpseed, and where donations go">
+              <button className="btn" onClick={() => openExternal(WEBSITE_URL)}>
+                Website
+              </button>
+              <button className="btn btn--primary" onClick={() => openExternal(DONATE_URL)}>
+                <Heart size={12} className="btn__ico" /> Support
+              </button>
+            </Row>
           </div>
         </section>
 

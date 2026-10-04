@@ -7,6 +7,9 @@ import {
   CancelQueuedTransfers,
   CancelTransfers,
   CloseToPill,
+  QueueWindowWaiting,
+  RememberWindow,
+  ShowInFolder,
   ConfirmQuit,
   CancelTransfer,
   CheckForUpdate,
@@ -99,6 +102,8 @@ export interface Site {
   optionsJson: string;
   remotePath: string;
   maxTransfers: number;
+  /** Bytes per second this site is limited to; 0 = no limit of its own. */
+  bandwidthLimit?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -300,6 +305,12 @@ export interface UpdateInfo {
 
 /** The running build, from the Go side. The frontend used to keep its own copy
     of this string and it drifted by six releases. */
+/** Ask the app to note the window's current size for the next launch. */
+export const rememberWindow = (): Promise<void> => RememberWindow();
+/** Whether the transfer hours setting is holding the queue back right now. */
+export const queueWindowWaiting = (): Promise<boolean> => QueueWindowWaiting();
+/** Open the folder holding a local file (or the folder itself) in the file manager. */
+export const showInFolder = (path: string): Promise<void> => ShowInFolder(path);
 export const appVersion = (): Promise<string> => AppVersion();
 export const checkForUpdate = (): Promise<UpdateInfo> =>
   CheckForUpdate() as unknown as Promise<UpdateInfo>;
@@ -309,8 +320,24 @@ export const dismissUpdate = (version: string): Promise<void> => DismissUpdate(v
 /** The account's home directory on a connected site. */
 export const remoteHome = (id: number): Promise<string> => RemoteHome(id) as Promise<string>;
 
-export async function connectAndHome(id: number, remotePath?: string): Promise<string> {
+/** Places that can suggest where to open a site (the "remember each site's
+    folder" setting). They are tried before the site's own start folder. */
+export const startPathHooks: Array<(id: number) => string | undefined> = [];
+
+export async function connectAndHome(id: number, remotePath?: string, useRemembered = true): Promise<string> {
   await ConnectSite(id);
+  if (useRemembered) {
+    for (const hook of startPathHooks) {
+      const hint = hook(id);
+      if (!hint) continue;
+      try {
+        await ListRemote(id, hint);
+        return hint;
+      } catch {
+        // gone or unreadable: fall back to the site's own start folder
+      }
+    }
+  }
   const configured = remotePath?.trim();
   if (configured) {
     try {

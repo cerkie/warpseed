@@ -17,7 +17,7 @@ import {
   Play,
   Refresh,
   Search,
-  Sliders,
+  Cog,
   Tree,
   Warning,
 } from "./Icon";
@@ -88,7 +88,7 @@ export default function CommandPalette() {
       { label: "Transfer history", icon: <Check size={15} />, run: close(() => useUiStore.getState().setHistoryOpen(true)) },
       {
         label: "Settings",
-        icon: <Sliders size={15} />,
+        icon: <Cog size={15} />,
         hint: "Ctrl+,",
         run: close(() => useUiStore.getState().setSettingsOpen(true)),
       },

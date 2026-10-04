@@ -21,12 +21,19 @@ func main() {
 
 	app := NewApp()
 
+	win := loadWindowState()
+	start := options.Normal
+	if win.Maximised {
+		start = options.Maximised
+	}
+
 	err := wails.Run(&options.App{
-		Title:     "warpseed",
-		Width:     1280,
-		Height:    800,
-		MinWidth:  900,
-		MinHeight: 560,
+		Title:            "warpseed",
+		Width:            win.Width,
+		Height:           win.Height,
+		MinWidth:         minWinW,
+		MinHeight:        minWinH,
+		WindowStartState: start,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

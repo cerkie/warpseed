@@ -263,7 +263,22 @@ Delete). **Cancel all queued** cancels everything waiting in the queue —
 queued rows, paused rows, and rows a queue pause put back; the whole queue,
 not just the rows on screen — and leaves running transfers alone. It always
 asks first, and says how many of those rows hold part-transferred data;
-Cancel selected asks only when data would be lost.
+Cancel selected asks only when data would be lost. Pressing Delete with two or
+more rows selected always asks, so Ctrl+A then Delete can't clear a queue by
+accident.
+
+**Undo.** When a cancel would throw part-transferred data away, warpseed first
+pauses the rows and shows *Cancelling N transfers… Undo* for eight seconds.
+Undo resumes them exactly where they were; otherwise the cancel goes through.
+Closing warpseed inside those eight seconds leaves the rows paused, never
+half-cancelled.
+
+**Filter.** The box in the queue toolbar narrows the list to rows whose name or
+destination match; Ctrl+A and Delete then act on what is shown.
+
+**Resize.** Drag the grip on the queue's top edge to make it taller (double-click
+to put it back); drag the dividers between column headings to resize columns.
+Both are remembered.
 
 **States:** queued · active · paused · completed · failed · cancelled. Failed rows
 show a plain-language reason and a **retry** button. Completed transfers leave
@@ -271,8 +286,9 @@ the queue list; Deck and Activity still show them for the session, and
 **Clear done** forgets them (they move to Transfer history).
 
 **Folders.** Files queued from one folder show as a single row with the folder
-name, how many are done, and a combined progress bar. Click it to see the
-files; its buttons pause, resume or cancel the whole folder. A long wait of
+name, how many are done, and a combined progress bar. The files are shown by
+default, and clicking the row folds them away; its buttons pause, resume or
+cancel the whole folder. A long wait of
 single files shows the first ten, then "+N more waiting" (click to show all).
 The line on the strip is plain text: active and queued counts, then anything
 needing a decision or failed.
@@ -447,7 +463,10 @@ Open with **Ctrl+,** or the gear icon.
 |---|---|
 | ![Cobalt](screenshots/theme-cobalt.png) | ![Iris](screenshots/theme-iris.png) |
 
-**Transfers** — these are connection budgets, not file counts. A Hyperlane
+Every setting is a row in a card: its name on the left, one control on the
+right. A small **i** next to a name explains it on hover.
+
+**Connections** — these are connection budgets, not file counts. A Hyperlane
 file spends one connection per lane, so the budget decides how many files
 run at once: 8 connections runs two 4-lane files, and a budget below the
 lane count narrows Hyperlane rather than queueing.
@@ -459,18 +478,37 @@ A file waits for its full lane count rather than starting on a spare
 connection, so a queue of large files runs them one at a time at full
 width instead of all of them at one connection's speed.
 
-**Hyperlane · Downloads** and **Hyperlane · Uploads** — see
+**Hyperlane** — downloads and uploads are set separately; see
 [above](#hyperlane--multi-connection-transfers).
+
+**Checks and warnings:**
+- *Check files after transfer* (off by default) compares each finished file with
+  the server's copy by SHA-256, which needs an SFTP server with `sha256sum`
+  (other sites are skipped). It makes transfers finish later, because both
+  copies are read again. A download that does not match is deleted and marked
+  failed so you can retry it, and a move never deletes its source first.
+- *Warn when the disk is short* (on) tells you when a batch of downloads will
+  not fit on the destination. The files are queued anyway.
+- *Remember each site's folder and sort* (off by default) reopens each site in
+  the folder you last had open there. The listing sort is shared by both panes,
+  so it follows the site you open.
+
+**Schedule and alerts** — *Only transfer at set hours* (off by default) stops new
+transfers starting outside the hours you give; running ones finish and nothing
+is paused or cancelled. The queue strip says *waiting for transfer hours*. A
+notification when the queue finishes can be turned off here too.
 
 **Bandwidth** — *Off*, *Fixed* (a MiB/s ceiling), or *% of max* (throttle
 to a percentage of your measured maximum, so a big run doesn't flatten
-the rest of your network).
+the rest of your network). A site can also have its own speed limit in its
+settings; the lower of the two applies.
 
 **Sites** — edit or delete saved sites: name, host, port, username,
-password, initial remote path, and a per-site max-transfers override.
+password, initial remote path, a per-site max-transfers override and a
+per-site speed limit.
 
-**Data** — shows where the settings/queue database lives, with buttons
-to open that folder and to make a backup copy.
+**Data** — where the settings/queue database lives, backups, and the transfer
+history.
 
 **About** — version, links to zyralabs.tech, **Report a bug** (opens a new
 issue on github.com/cerkie/warpseed with the version pre-filled), and

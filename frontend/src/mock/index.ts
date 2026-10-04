@@ -183,6 +183,7 @@ const App = {
       optionsJson: "{}",
       remotePath: site.remotePath || "",
       maxTransfers: site.maxTransfers || 4,
+      bandwidthLimit: site.bandwidthLimit || 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -210,8 +211,13 @@ const App = {
   async ConfirmQuit() {},
   async CancelQuit() {},
   async CloseToPill() {},
+  async RememberWindow() {},
+  async ShowInFolder() {},
+  async QueueWindowWaiting() {
+    return false;
+  },
   async AppVersion() {
-    return "1.3.2";
+    return "1.3.3";
   },
   async CheckForUpdate() {
     await delay(120);

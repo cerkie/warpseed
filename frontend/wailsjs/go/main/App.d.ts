@@ -93,6 +93,10 @@ export function PickFile(arg1:string):Promise<string>;
 
 export function QueuePaused():Promise<boolean>;
 
+export function QueueWindowWaiting():Promise<boolean>;
+
+export function RememberWindow():Promise<void>;
+
 export function RemoteHome(arg1:number):Promise<string>;
 
 export function RenameLocal(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -118,6 +122,8 @@ export function SetQueuePaused(arg1:boolean):Promise<void>;
 export function SetSetting(arg1:string,arg2:string):Promise<void>;
 
 export function SetSiteRemotePath(arg1:number,arg2:string):Promise<void>;
+
+export function ShowInFolder(arg1:string):Promise<void>;
 
 export function Sites():Promise<Array<queue.Site>>;
 

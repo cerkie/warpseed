@@ -1062,6 +1062,7 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 
 	ids := make([]int64, 0, len(files))
 	skippedByPolicy := 0
+	var queuedBytes int64
 	for _, it := range files {
 		name, err := safeLocalName(it.Src)
 		if err != nil {
@@ -1082,8 +1083,10 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 			continue
 		}
 		ids = append(ids, id)
+		queuedBytes += it.Size
 	}
 	a.reportShortened()
+	a.warnLowSpace(localDir, queuedBytes)
 
 	if len(dirs) > 0 {
 		go a.expandRemoteDirs(client, siteID, dirs, localDir)
@@ -1102,6 +1105,7 @@ func (a *App) EnqueueDownloads(siteID int64, items []DownloadItem, localDir stri
 // goroutine: big trees must never block the UI thread.
 func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []DownloadItem, localDir string) {
 	total := 0
+	var queuedBytes int64
 	skipped := 0
 	for _, dir := range dirs {
 		root := path.Clean(dir.Src)
@@ -1132,6 +1136,9 @@ func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []Dow
 				return nil
 			}
 			total++
+			if size > 0 {
+				queuedBytes += size
+			}
 			if total%25 == 0 {
 				a.sink.Emit("queue:changed", nil)
 				a.dispatcher.Wake()
@@ -1142,6 +1149,7 @@ func (a *App) expandRemoteDirs(client *sftpfast.Client, siteID int64, dirs []Dow
 			a.sink.Emit("app:error", fmt.Sprintf("folder %s: %v", path.Base(root), err))
 		}
 	}
+	a.warnLowSpace(localDir, queuedBytes)
 	msg := fmt.Sprintf("Queued %d file(s) from %d folder(s)", total, len(dirs))
 	if skipped > 0 {
 		msg += fmt.Sprintf(" · %d skipped (overwrite rules, or an unsafe name)", skipped)
@@ -1337,6 +1345,15 @@ func (a *App) QueuePaused() (bool, error) {
 		return false, errNoStore
 	}
 	return a.dispatcher.Paused(), nil
+}
+
+// QueueWindowWaiting reports whether the transfer hours are holding the queue
+// back, for the dock's first paint; changes arrive on the queue:window event.
+func (a *App) QueueWindowWaiting() bool {
+	if a.dispatcher == nil {
+		return false
+	}
+	return a.dispatcher.WindowWaiting()
 }
 
 // ClearDoneTransfers removes completed and cancelled rows.
@@ -1827,6 +1844,19 @@ func (a *App) OpenDataFolder() error {
 	return nil
 }
 
+// ShowInFolder opens the folder holding a local file, or the folder itself.
+func (a *App) ShowInFolder(p string) error {
+	st, err := os.Stat(p)
+	if err != nil {
+		return err
+	}
+	dir := p
+	if !st.IsDir() {
+		dir = filepath.Dir(p)
+	}
+	return openInFileManager(dir)
+}
+
 // --- Settings bindings ---
 
 // settingValidators allowlists the keys the frontend may write AND the
@@ -1864,6 +1894,15 @@ var settingValidators = map[string]func(string) error{
 	// Queue on launch. queue.paused itself is written by the dispatcher, not
 	// by the settings dialog.
 	"queue.start_paused": oneOf("0", "1"),
+	// Only start new transfers between these hours (local time).
+	"queue.window_on":   oneOf("0", "1"),
+	"queue.window_from": intRange(0, 23),
+	"queue.window_to":   intRange(0, 23),
+	// Compare each finished file with the server's copy by checksum. Off by
+	// default: it reads every file twice.
+	"transfers.verify": oneOf("0", "1"),
+	// Warn when a batch of downloads will not fit on the destination disk.
+	"transfers.space_warning": oneOf("0", "1"),
 	// "dark"/"light" are the pre-v3 names, still accepted so an existing
 	// setting keeps working; the frontend maps them to the new themes.
 	"ui.theme":         oneOf("clay", "cobalt", "iris", "graphite", "system", "flightdeck", "drafting", "press", "nightshift", "dark", "light"),
@@ -1871,6 +1910,9 @@ var settingValidators = map[string]func(string) error{
 	// UI layout state lives here rather than in browser storage, so one
 	// backup of the database captures everything except credentials.
 	"ui.queue_columns": jsonBlob,
+	"ui.remember_site_views": oneOf("0", "1"), // reopen each site where, and how sorted, it was left
+	"ui.site_views":          jsonBlob,
+	"ui.queue_height":  queueHeight, // the open queue's height in pixels; "0" is the default
 	"ui.queue_sort":    jsonBlob,
 	"ui.pane_columns":  jsonBlob,
 	"ui.pane_sort":     jsonBlob,
@@ -1897,6 +1939,14 @@ var settingValidators = map[string]func(string) error{
 	// Verbose engine log: per-lane ranges, first-write latency, cancel
 	// requested vs honoured. Off by default; a bug report turns it on.
 	"log.verbose": oneOf("", "0", "1"),
+}
+
+// queueHeight is a pixel height, or "0" for "use the default".
+func queueHeight(v string) error {
+	if v == "0" {
+		return nil
+	}
+	return intRange(60, 4000)(v)
 }
 
 func intRange(lo, hi int) func(string) error {

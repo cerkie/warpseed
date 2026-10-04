@@ -2,6 +2,7 @@ import { cancelTransfer, type Transfer } from "../ipc";
 import { formatSize } from "./format";
 import { baseName } from "./path";
 import { useUiStore } from "../store";
+import { cancelWithUndo } from "./undoCancel";
 
 /** Ask before cancelling, because cancel deletes the part-transferred data.
  *
@@ -30,7 +31,7 @@ export function confirmCancel(id: number) {
     confirmLabel: "Cancel transfer",
     danger: true,
     suppressKey: "cancel-transfer",
-    onConfirm: () => void cancelTransfer(id),
+    onConfirm: () => cancelWithUndo([t]),
   });
 }
 

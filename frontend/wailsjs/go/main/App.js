@@ -178,6 +178,14 @@ export function QueuePaused() {
   return window['go']['main']['App']['QueuePaused']();
 }
 
+export function QueueWindowWaiting() {
+  return window['go']['main']['App']['QueueWindowWaiting']();
+}
+
+export function RememberWindow() {
+  return window['go']['main']['App']['RememberWindow']();
+}
+
 export function RemoteHome(arg1) {
   return window['go']['main']['App']['RemoteHome'](arg1);
 }
@@ -228,6 +236,10 @@ export function SetSetting(arg1, arg2) {
 
 export function SetSiteRemotePath(arg1, arg2) {
   return window['go']['main']['App']['SetSiteRemotePath'](arg1, arg2);
+}
+
+export function ShowInFolder(arg1) {
+  return window['go']['main']['App']['ShowInFolder'](arg1);
 }
 
 export function Sites() {

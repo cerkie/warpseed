@@ -358,6 +358,7 @@ export namespace queue {
 	    optionsJson: string;
 	    remotePath: string;
 	    maxTransfers: number;
+	    bandwidthLimit: number;
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -377,6 +378,7 @@ export namespace queue {
 	        this.optionsJson = source["optionsJson"];
 	        this.remotePath = source["remotePath"];
 	        this.maxTransfers = source["maxTransfers"];
+	        this.bandwidthLimit = source["bandwidthLimit"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }

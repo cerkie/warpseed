@@ -194,3 +194,20 @@ export const Columns = icon(
     <path d="M6.1 3.25v9.5M9.9 3.25v9.5" />
   </>,
 );
+
+/** A circle with an "i": the marker for a hover explanation (see Info.tsx). */
+export const InfoCircle = icon(
+  <>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 7.25v3.5" />
+    <path d="M8 5.1v.01" />
+  </>,
+);
+
+/** A cog: the usual mark for settings. */
+export const Cog = icon(
+  <>
+    <path d="M12.85 6.79 14.53 7.02v1.96l-1.68.23-.57 1.37 1.03 1.34-1.39 1.39-1.34-1.03-1.37.57-.23 1.68H7.02l-.23-1.68-1.37-.57-1.34 1.03-1.39-1.39 1.03-1.34-.57-1.37-1.68-.23V7.02l1.68-.23.57-1.37-1.03-1.34 1.39-1.39 1.34 1.03 1.37-.57.23-1.68h1.96l.23 1.68 1.37.57 1.34-1.03 1.39 1.39-1.03 1.34z" />
+    <circle cx="8" cy="8" r="2" />
+  </>,
+);

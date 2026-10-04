@@ -1134,3 +1134,60 @@ func TestInScheduleWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestOutsideWindow(t *testing.T) {
+	d, store := newTestDispatcher(t)
+	if d.outsideWindow() {
+		t.Fatal("no limit set, yet the queue is held back")
+	}
+	hour := time.Now().Hour()
+	set := func(k, v string) {
+		if err := store.SetSetting(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("queue.window_on", "1")
+	// A window around now lets transfers start; one that ended an hour ago does not.
+	set("queue.window_from", fmt.Sprint(hour))
+	set("queue.window_to", fmt.Sprint((hour+2)%24))
+	if d.outsideWindow() {
+		t.Fatal("inside the window, yet held back")
+	}
+	set("queue.window_from", fmt.Sprint((hour+2)%24))
+	set("queue.window_to", fmt.Sprint((hour+4)%24))
+	if !d.outsideWindow() {
+		t.Fatal("outside the window, yet allowed")
+	}
+	// An empty window means no limit rather than a queue that never starts.
+	set("queue.window_to", fmt.Sprint((hour+2)%24))
+	if d.outsideWindow() {
+		t.Fatal("from == to must not stop the queue")
+	}
+}
+
+func TestSiteLimiter(t *testing.T) {
+	d, store := newTestDispatcher(t)
+	id, err := store.SaveSite(queue.Site{Name: "s", Protocol: "sftp", Host: "h", BandwidthLimit: 2 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lim := d.siteLimiter(id)
+	if lim == nil || int64(lim.Limit()) != 2<<20 {
+		t.Fatalf("limiter = %v", lim)
+	}
+	if again := d.siteLimiter(id); again != lim {
+		t.Fatal("a site's transfers must share one limiter")
+	}
+	if _, err := store.SaveSite(queue.Site{ID: id, Name: "s", Protocol: "sftp", Host: "h", BandwidthLimit: 1 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	if d.siteLimiter(id) != lim || int64(lim.Limit()) != 1<<20 {
+		t.Fatal("a changed limit must update the shared limiter")
+	}
+	if _, err := store.SaveSite(queue.Site{ID: id, Name: "s", Protocol: "sftp", Host: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	if d.siteLimiter(id) != nil {
+		t.Fatal("no limit set, yet a limiter came back")
+	}
+}

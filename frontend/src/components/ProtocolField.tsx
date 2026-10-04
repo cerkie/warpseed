@@ -31,9 +31,17 @@ export default function ProtocolField({
           <option value="ftps-implicit">FTPS (implicit TLS)</option>
           <option value="ftp">FTP (no encryption)</option>
         </select>
-        <span className="note">{HINTS[form.mode]}</span>
+        {/* Two lines reserved, so switching protocol never resizes the dialog. */}
+        <span className="note note--two">{HINTS[form.mode]}</span>
       </div>
-      {form.mode === "sftp" && (
+      {form.mode !== "sftp" ? (
+        <div className="field wide">
+          <label>Log in with</label>
+          <select value="password" disabled aria-label="Log in with">
+            <option value="password">Username and password</option>
+          </select>
+        </div>
+      ) : (
         <div className="field wide">
           <label>Log in with</label>
           <select
